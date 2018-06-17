@@ -83,12 +83,12 @@ class MarketsListings:
 		'''
 		return json.loads(requests.get(self._cryptocurrency_base_url+'ticker/?limit='+str(num)).text,object_pairs_hook = OrderedDict)
 	
-	def get_crypto_id(self,name.upper()):
+	def get_crypto_id(self,name):
 		'''
 		returns the cryptocurrency id on coinmarketcap.com
 		@param name (string): name of the coin to pull.
 		'''
-		return self._cryptoccurency_listings[name]["id"]
+		return self._cryptoccurency_listings[name.upper()]["id"]
 
 class Stock:
 	'''
@@ -237,7 +237,8 @@ class Coin:
 		self._website_slug = None 
 		self._name = None
 		self.get_info(coin_id)
-	
+		self.daily_candles = self.get_historical_data()
+
 	def get_info(self,coin_id):
 		'''
 		sets the init objects
@@ -269,8 +270,8 @@ class Coin:
 		soup = BeautifulSoup(raw_html.read(),"html.parser")
 
 		history = soup.find("table",attrs = {"table"})
-		headings = [th.get_text() for th in history.find("tr").find_all("th")]
-        
+		headings = [th.get_text().replace("*","").lower() for th in history.find("tr").find_all("th")]
+
 		json_data = collections.OrderedDict()
 		data = {}
 		count = 0 #this is used to determine which column is being used
@@ -291,8 +292,65 @@ class Coin:
 			else:
 				data[headings[count]] = td.text.strip()
 				count+=1
-                   
-		return json.dumps(json_data)
 
+		self.daily_candles = json_data     
+		return json_data
 
+	def check_intervals(self,time_period):
+		'''
+		Checks to make sure there are enough candle stick data for the time period
+		@param time_period (int): amount of data points one desires to check
+		'''
+		if time_period <= len(self.daily_candles.keys()):
+			return True
+		else:
+			return False
 
+	def sma(self,time_period = 10, series_type = "close"):
+		'''
+		queris the Simple Moving Average on the coin
+		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
+		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		'''
+		sma_dict = collections.OrderedDict()
+		candle_list = self.daily_candles.items() #creates ordered dict as a tuple [tuple index][0 = date, 1 = dictionary][dictionary key]
+		sma_sum = [] 
+
+		if self.check_intervals(time_period):
+			for i in range(len(candle_list)-1,-1,-1): #need to start from the end of the list because the oldest values are on the end of the list 
+				if len(sma_sum) < time_period: 
+					sma_sum.append(float(candle_list[i][1][series_type.lower()])) 
+				
+				if len(sma_sum) == time_period:
+					sma_dict[candle_list[i][0]] = sum(sma_sum) / time_period
+					sma_sum.pop(0)
+	
+		return sma_dict
+
+	def ema(self,time_period = 10, series_type = "close"):
+		'''
+		Queries the Exponential Moving Average on the Coin.
+		@param time_period (int): number of data points used to calculate each moving average value. Default = 200, Accepted Values: Positive values
+		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		'''
+		ema_dict = collections.OrderedDict()
+		candle_list = self.daily_candles.items() #creates ordered dict as a tuple [tuple index][0 = date, 1 = dictionary][dictionary key]
+		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
+		multiplier = (2.0 / (time_period + 1)) 
+		ema_switch = False #after calculating init_sum, turns switches into ema
+
+		if self.check_intervals(time_period):
+			for i in range(len(candle_list)-1,-1,-1): #need to start from the end of the list because the oldest values are on the end of the list 
+				if len(init_sum) < time_period: 
+					init_sum.append(float(candle_list[i][1][series_type.lower()]))
+
+				elif (len(init_sum) == time_period and ema_switch == False): #once the intital value is finished calculating
+					ema_dict[candle_list[i][0]] = sum(init_sum) / time_period
+					ema_switch = True
+
+				else:
+					current_value = float(candle_list[i][1][series_type.lower()])
+					previous_day = ema_dict[candle_list[i+1][0]] #because the list is backwards, the previous value is after current value
+					ema_dict[candle_list[i][0]] = ((current_value - previous_day) * multiplier) + previous_day
+					
+		return ema_dict
