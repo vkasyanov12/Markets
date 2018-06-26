@@ -292,6 +292,8 @@ class Coin:
 			else:
 				data[headings[count]] = td.text.strip()
 				count+=1
+		
+		json_data = collections.OrderedDict(reversed(list(json_data.items()))) #reversed it in order to have the most recent items on the bottom
 
 		self.daily_candles = json_data     
 		return json_data
@@ -313,44 +315,83 @@ class Coin:
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
 		sma_dict = collections.OrderedDict()
-		candle_list = self.daily_candles.items() #creates ordered dict as a tuple [tuple index][0 = date, 1 = dictionary][dictionary key]
 		sma_sum = [] 
 
 		if self.check_intervals(time_period):
-			for i in range(len(candle_list)-1,-1,-1): #need to start from the end of the list because the oldest values are on the end of the list 
-				if len(sma_sum) < time_period: 
-					sma_sum.append(float(candle_list[i][1][series_type.lower()])) 
-				
+			for day in range(len(self.daily_candles.keys())):
+				if len(sma_sum) < time_period:
+					sma_sum.append(float(self.daily_candles.values()[day][series_type]))
+
 				if len(sma_sum) == time_period:
-					sma_dict[candle_list[i][0]] = sum(sma_sum) / time_period
+					sma_dict[self.daily_candles.keys()[day]] = sum(sma_sum) / time_period
 					sma_sum.pop(0)
-	
-		return sma_dict
+
+			return sma_dict
+		else:
+			return "Not enough data points"
 
 	def ema(self,time_period = 10, series_type = "close"):
 		'''
 		Queries the Exponential Moving Average on the Coin.
-		@param time_period (int): number of data points used to calculate each moving average value. Default = 200, Accepted Values: Positive values
+		@param time_period (int): number of data points used to calculate each moving average value. Default = 10, Accepted Values: Positive values
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
 		ema_dict = collections.OrderedDict()
-		candle_list = self.daily_candles.items() #creates ordered dict as a tuple [tuple index][0 = date, 1 = dictionary][dictionary key]
 		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
 		multiplier = (2.0 / (time_period + 1)) 
-		ema_switch = False #after calculating init_sum, turns switches into ema
 
-		if self.check_intervals(time_period):
-			for i in range(len(candle_list)-1,-1,-1): #need to start from the end of the list because the oldest values are on the end of the list 
-				if len(init_sum) < time_period: 
-					init_sum.append(float(candle_list[i][1][series_type.lower()]))
+		if self.check_intervals(time_period):#checks if there is enough intervals for calculation
+			
+			for day in range(time_period): #initializes the begining value for the ema
+				init_sum.append(float(self.daily_candles.values()[day][series_type]))
 
-				elif (len(init_sum) == time_period and ema_switch == False): #once the intital value is finished calculating
-					ema_dict[candle_list[i][0]] = sum(init_sum) / time_period
-					ema_switch = True
+			ema_dict[self.daily_candles.keys()[time_period-1]] = sum(init_sum) / time_period
 
-				else:
-					current_value = float(candle_list[i][1][series_type.lower()])
-					previous_day = ema_dict[candle_list[i+1][0]] #because the list is backwards, the previous value is after current value
-					ema_dict[candle_list[i][0]] = ((current_value - previous_day) * multiplier) + previous_day
-					
-		return ema_dict
+			for day in range(time_period,len(self.daily_candles.keys())):
+				current_value = float(self.daily_candles.values()[day][series_type])
+				previous_day = ema_dict[self.daily_candles.keys()[day-1]]
+				ema_dict[self.daily_candles.keys()[day]] = ((current_value - previous_day) * multiplier) + previous_day
+
+			return ema_dict
+		else:
+			return "Not enough data points"
+
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close"):
+		'''
+		Queries the Moving Average Convergence/Divergence on the Coin
+		@param fast_period (int). Default = 12, Accepted Values: Positive integers
+		@param slow_period (int). Default = 26, Accepted Values: Positive integers
+		@param signal_period (int). Default = 9, Accepted Values: Positive integers
+		'''
+		if self.check_intervals(slow_period+signal_period):#checks to make sure there is enough data points
+			
+			fast_period_data = self.ema(fast_period,series_type)
+			slow_period_data = self.ema(slow_period,series_type)
+			macd = collections.OrderedDict() #holds macd_line,signal_line,macd_histogram
+			macd_line = collections.OrderedDict()
+			signal_line = collections.OrderedDict()
+			macd_histogram = collections.OrderedDict()
+
+			for key in slow_period_data.keys(): #calculates macd_line
+				macd_line[key] = fast_period_data[key] - slow_period_data[key]
+
+			init_sum = []#used for signal_line sum		
+			for i in range(signal_period):#initializes the signal_line data
+				init_sum.append(macd_line.values()[i])
+			
+			signal_line[macd_line.keys()[signal_period-1]] = sum(init_sum) / signal_period
+			multiplier = multiplier = (2.0 / (signal_period + 1)) 
+
+			for day in range(signal_period,len(macd_line.keys())):#calculates signal_line
+				current_value = macd_line.values()[day]
+				previous_day = signal_line[macd_line.keys()[day-1]]
+				signal_line[macd_line.keys()[day]] = ((current_value - previous_day) * multiplier) + previous_day
+				
+			for key in signal_line.keys(): #calculates macd_histogram and assigns all values to macd
+				macd_histogram[key] = macd_line[key] - signal_line[key]
+				macd[key] = {'macd_line':macd_line[key], 'signal_line':signal_line[key],'macd_histogram':macd_histogram[key]} 
+				
+			return macd
+		
+		else:
+			return "Not enough data points"
