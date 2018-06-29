@@ -192,10 +192,10 @@ class Stock:
 		return json.loads(requests.get(self.indicator_builder("STOCH")+"&fastkperiod="+str(fastk_period)+"&slowkperiod="+str(slowk_period)+"&slowdperiod="+
 			   str(slowd_period)+"&slowkmatype="+str(slowk_matype)+"&slowdmatype="+str(slowd_matype)+self.__apikey).text,object_pairs_hook = OrderedDict)
 
-	def rsi(self,time_period = 60,series_type = "close"):
+	def rsi(self,time_period = 14,series_type = "close"):
 		'''
 		Queries the Relative Strength Index
-		@param time_period (int): Number of data points used to calculate the rsi. Default = 60, Accepted Values: Positive integers
+		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
 		@param series_type (string): Price type in the time series. Default = "close", Accepted Values: "close","open","high","low"
 		'''
 		return json.loads(requests.get(self.indicator_builder("RSI")+"&time_period="+str(time_period)+"&series_type="+series_type+self.__apikey).text,object_pairs_hook = OrderedDict)
@@ -310,7 +310,7 @@ class Coin:
 
 	def sma(self,time_period = 10, series_type = "close"):
 		'''
-		queris the Simple Moving Average on the coin
+		Queris the Simple Moving Average on the Coin
 		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
@@ -340,8 +340,7 @@ class Coin:
 		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
 		multiplier = (2.0 / (time_period + 1)) 
 
-		if self.check_intervals(time_period):#checks if there is enough intervals for calculation
-			
+		if self.check_intervals(time_period):#checks if there is enough intervals for calculation		
 			for day in range(time_period): #initializes the begining value for the ema
 				init_sum.append(float(self.daily_candles.values()[day][series_type]))
 
@@ -393,5 +392,44 @@ class Coin:
 				
 			return macd
 		
+		else:
+			return "Not enough data points"
+
+	def rsi(self,time_period = 14,series_type = "close"):
+		'''
+		Queries the Relative Strength Index
+		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
+		@param series_type (string): Price type in the time series. Default = "close", Accepted Values: "close","open","high","low"
+		'''
+		gain = 0 #used to measure average gain
+		loss = 0 #used to measure average loss
+		rsi = collections.OrderedDict() #holds the rsi by date
+
+		if self.check_intervals(time_period): #checks to make sure there is enough data points
+			for day in range(1,time_period): #need to calculate the initial rsi
+				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
+				
+				if value > 0:
+					gain += value
+				elif value < 0:
+					loss += abs(value)
+				
+			gain = gain/time_period
+			loss = loss/time_period
+
+			rsi[self.daily_candles.keys()[time_period-1]] = 100 - (100 / (1 +(gain/loss)))#sets the first day rsi
+			
+			for day in range(time_period,len(self.daily_candles.keys())):
+				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
+
+				if value > 0:
+					gain = (gain * (time_period - 1) + value) / time_period
+				elif value < 0:
+					loss = (loss * (time_period - 1) + abs(value)) / time_period
+
+				rsi[self.daily_candles.keys()[day]] = 100 - (100 / (1 +(gain/loss)))
+
+			return rsi
+
 		else:
 			return "Not enough data points"
