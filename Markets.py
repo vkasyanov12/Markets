@@ -310,7 +310,7 @@ class Coin:
 
 	def sma(self,time_period = 10, series_type = "close"):
 		'''
-		Queris the Simple Moving Average on the Coin
+		Queries the Simple Moving Average on the Coin
 		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
@@ -395,7 +395,7 @@ class Coin:
 		else:
 			return "Not enough data points"
 
-	def rsi(self,time_period = 14,series_type = "close"):
+	def rsi(self,time_period = 14, series_type = "close"):
 		'''
 		Queries the Relative Strength Index
 		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
@@ -431,5 +431,49 @@ class Coin:
 
 			return rsi
 
+		else:
+			return "Not enough data points"
+
+
+	def stoch(self,slowk_period = 3, slowd_period = 3,time_period = 14, series_type = "close"):
+		'''
+		Quries the Stochastic Oscillator on the Coin
+		@param slowk_period (int): Time period of the slowk moving average. Default = 3, Accepted Values: Positive integers
+		@param slowd_period (int): Time period of the slowd moving average. Default = 3, Accepted Values: Positive integers
+		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
+		@param series_type (string): Price type in the time series for the rsi. Default = "close", Accepted Values: "close","open","high","low"
+
+		NOTE:THE CALCULATIONS SEEM TO BE OFF, CHECK LATER WHEN GRAPH IS IMPLEMENTED
+		'''
+		stoch = collections.OrderedDict() #holds the stoch data
+		initial_data = self.rsi(time_period,series_type) #initial rsi data required in order to calculate stoch
+		
+		rsi_list = [] #holds the time_period average
+		fastk = [] #holds fastk calculations
+		slowk = [] #holds the slowk calculations
+		
+		if check_intervals(time_period+slowk_period+slowd_period): #checks to see if there is enough data points
+			#fastk requires the rsi, slowk requires fastk and slowd requires slowk.
+			for day in initial_data.keys():
+				if len(rsi_list) < time_period: #first create the list of rsi values to average depending on the time period
+					rsi_list.append(initial_data[day]) 
+
+				if len(rsi_list) == time_period:
+					fastk_calc = ((initial_data[day] - min(rsi_list))/(max(rsi_list) - min(rsi_list))) * 100
+					rsi_list.pop(0) #removes the first value for the next value to be appended
+					
+					if len(fastk) < slowk_period: #creates the fastk list to average later for the slowk
+						fastk.append(fastk_calc)
+
+					if len(fastk) == slowk_period: #calculates the slowk
+						slowk_calc = sum(fastk) / slowk_period
+						slowk.append(slowk_calc) #adds the slowk list in order to average the slowd later
+						fastk.pop(0)
+
+						if len(slowk) == slowd_period: #calculates the slowd
+							slowd_calc = sum(slowk) / slowd_period
+							stoch[day] = {"slowk_k" : slowk_calc, "slow_d" : slowd_calc}
+							slowk.pop(0)
+			return stoch
 		else:
 			return "Not enough data points"
