@@ -272,7 +272,7 @@ class Coin:
 		history = soup.find("table",attrs = {"table"})
 		headings = [th.get_text().replace("*","").lower() for th in history.find("tr").find_all("th")]
 
-		json_data = collections.OrderedDict()
+		json_data = OrderedDict()
 		data = {}
 		count = 0 #this is used to determine which column is being used
 		date = ""
@@ -293,7 +293,7 @@ class Coin:
 				data[headings[count]] = td.text.strip()
 				count+=1
 		
-		json_data = collections.OrderedDict(reversed(list(json_data.items()))) #reversed it in order to have the most recent items on the bottom
+		json_data = OrderedDict(reversed(list(json_data.items()))) #reversed it in order to have the most recent items on the bottom
 
 		self.daily_candles = json_data     
 		return json_data
@@ -314,7 +314,7 @@ class Coin:
 		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
-		sma_dict = collections.OrderedDict()
+		sma_dict = OrderedDict()
 		sma_sum = [] 
 
 		if self.check_intervals(time_period):
@@ -336,7 +336,7 @@ class Coin:
 		@param time_period (int): number of data points used to calculate each moving average value. Default = 10, Accepted Values: Positive values
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		'''
-		ema_dict = collections.OrderedDict()
+		ema_dict = OrderedDict()
 		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
 		multiplier = (2.0 / (time_period + 1)) 
 
@@ -366,10 +366,10 @@ class Coin:
 			
 			fast_period_data = self.ema(fast_period,series_type)
 			slow_period_data = self.ema(slow_period,series_type)
-			macd = collections.OrderedDict() #holds macd_line,signal_line,macd_histogram
-			macd_line = collections.OrderedDict()
-			signal_line = collections.OrderedDict()
-			macd_histogram = collections.OrderedDict()
+			macd = OrderedDict() #holds macd_line,signal_line,macd_histogram
+			macd_line = OrderedDict()
+			signal_line = OrderedDict()
+			macd_histogram = OrderedDict()
 
 			for key in slow_period_data.keys(): #calculates macd_line
 				macd_line[key] = fast_period_data[key] - slow_period_data[key]
@@ -403,10 +403,10 @@ class Coin:
 		'''
 		gain = 0 #used to measure average gain
 		loss = 0 #used to measure average loss
-		rsi = collections.OrderedDict() #holds the rsi by date
+		rsi = OrderedDict() #holds the rsi by date
 
 		if self.check_intervals(time_period): #checks to make sure there is enough data points
-			for day in range(1,time_period): #need to calculate the initial rsi
+			for day in range(0,time_period): #need to calculate the initial rsi
 				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
 				
 				if value > 0:
@@ -445,14 +445,14 @@ class Coin:
 
 		NOTE:THE CALCULATIONS SEEM TO BE OFF, CHECK LATER WHEN GRAPH IS IMPLEMENTED
 		'''
-		stoch = collections.OrderedDict() #holds the stoch data
+		stoch = OrderedDict() #holds the stoch data
 		initial_data = self.rsi(time_period,series_type) #initial rsi data required in order to calculate stoch
 		
 		rsi_list = [] #holds the time_period average
 		fastk = [] #holds fastk calculations
 		slowk = [] #holds the slowk calculations
 		
-		if check_intervals(time_period+slowk_period+slowd_period): #checks to see if there is enough data points
+		if self.check_intervals(time_period+slowk_period+slowd_period): #checks to see if there is enough data points
 			#fastk requires the rsi, slowk requires fastk and slowd requires slowk.
 			for day in initial_data.keys():
 				if len(rsi_list) < time_period: #first create the list of rsi values to average depending on the time period
@@ -475,5 +475,39 @@ class Coin:
 							stoch[day] = {"slowk_k" : slowk_calc, "slow_d" : slowd_calc}
 							slowk.pop(0)
 			return stoch
+		else:
+			return "Not enough data points"
+
+	def cci(self,time_period = 20):
+		'''
+		Queries the Commodity Channel Index on the Coin.
+		@param time_period (int): Number of data points to calculate CCI. Default = 20, Accepted Values: Positive Integers
+		'''
+		constant = .015
+		tp_sma = [] 
+		cci = OrderedDict()
+		mean_dev = 0
+
+		if self.check_intervals(time_period):
+			for day in self.daily_candles.keys():
+				#tp = typical price
+				tp = (float(self.daily_candles[day]["high"]) + float(self.daily_candles[day]["low"]) + float(self.daily_candles[day]["close"])) / 3
+
+				if len(tp_sma) < time_period: #builds the simple moving average
+					tp_sma.append(tp)
+
+				if len(tp_sma) == time_period:
+					tp_avg = sum(tp_sma) / time_period
+
+					for value in tp_sma: #calculates the mean deviation
+						mean_dev += abs(tp_avg - value)
+
+					mean_dev = mean_dev / time_period
+					
+					cci[day] = (tp - tp_avg)/(constant * mean_dev)
+					tp_sma.pop(0) #need to remove the first value due to moving average
+					mean_dev = 0
+
+			return cci
 		else:
 			return "Not enough data points"
