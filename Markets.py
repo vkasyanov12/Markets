@@ -8,6 +8,7 @@ import dateparser
 import datetime
 from datetime import timedelta
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
+import numpy
 
 '''
 works only with python 2.7
@@ -424,8 +425,10 @@ class Coin:
 
 				if value > 0:
 					gain = (gain * (time_period - 1) + value) / time_period
+					loss = (loss * (time_period - 1)) / time_period
 				elif value < 0:
 					loss = (loss * (time_period - 1) + abs(value)) / time_period
+					gain = (gain * (time_period - 1)) / time_period
 
 				rsi[self.daily_candles.keys()[day]] = 100 - (100 / (1 +(gain/loss)))
 
@@ -498,10 +501,10 @@ class Coin:
 
 				if len(tp_sma) == time_period:
 					tp_avg = sum(tp_sma) / time_period
-
+					
 					for value in tp_sma: #calculates the mean deviation
 						mean_dev += abs(tp_avg - value)
-
+					
 					mean_dev = mean_dev / time_period
 					
 					cci[day] = (tp - tp_avg)/(constant * mean_dev)
@@ -509,5 +512,34 @@ class Coin:
 					mean_dev = 0
 
 			return cci
+		else:
+			return "Not enough data points"
+
+	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2):
+		'''
+		Queries the Bollinger Bands on the coin.
+		@param time_period (int): Number of data points used to calculate BBands. Default = 60. Accepted Values: Positive integers
+		@param series_type (string): Desired price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		@param nbdevup (int): Standard deviation multiplier of the upper band. Default = 2. Accepted Values: Positive integers
+		@param nbdevdn (int): Standard deviation multiplier of the lower band. Default = 2. Accepted Values: Positive integers
+		'''
+		bbands = OrderedDict()
+		sma_band = [] 
+		bband_avg = 0 #used to calculate the middle_band,upper_band and lowe_band
+
+		if self.check_intervals(time_period):
+			for day in self.daily_candles.keys():
+				if len(sma_band) < time_period:
+					sma_band.append(float(self.daily_candles[day][series_type])) #adds to the list in order to sum up later
+
+				if len(sma_band) == time_period:
+					bband_avg = sum(sma_band) / time_period #calculates middle band
+					bbands[day] = {"middle_band": bband_avg,
+								   "upper_band":bband_avg+(numpy.std(sma_band)*nbdevup),  
+								   "lower_band":bband_avg-(numpy.std(sma_band)*nbdevup)}
+
+					sma_band.pop(0)
+
+			return bbands
 		else:
 			return "Not enough data points"
