@@ -301,22 +301,15 @@ class Coin:
 		self.daily_candles = json_data     
 		return json_data
 
-	def panda_df(self):
+	def panda_df(self,data):
 		'''Creates a panda dataframe out of the candle data provided'''
-		df = pd.DataFrame(columns = [self.daily_candles.values()[0].keys()],
-									index = [self.daily_candles.keys()])#creates the df with json columns and dates as indeces
+		frames = []
+		for day in data.keys():
+			df = pd.DataFrame(data[day],index = [day])
+			frames.append(df)
 		
-		for i in range(df.shape[0]):
-			row_data = self.daily_candles.values()[i]
-			df.iloc[i].volume = row_data['volume']
-			df.iloc[i].marketcap = row_data['marketcap']
-			df.iloc[i].high = row_data['high']
-			df.iloc[i].low = row_data['low']
-			df.iloc[i].close = row_data['close']
-			df.iloc[i].open = row_data['open']
-
-		return df
-
+		return pd.concat(frames)
+		
 	def check_intervals(self,time_period):
 		'''
 		Checks to make sure there are enough candle stick data for the time period
@@ -342,7 +335,7 @@ class Coin:
 					sma_sum.append(float(self.daily_candles.values()[day][series_type]))
 
 				if len(sma_sum) == time_period:
-					sma_dict[self.daily_candles.keys()[day]] = numpy.average(sma_sum)
+					sma_dict[self.daily_candles.keys()[day]] = {"sma":numpy.average(sma_sum)}
 					sma_sum.pop(0)
 
 			return sma_dict
@@ -363,12 +356,11 @@ class Coin:
 			for day in range(time_period): #initializes the begining value for the ema
 				init_sum.append(float(self.daily_candles.values()[day][series_type]))
 
-			ema_dict[self.daily_candles.keys()[time_period-1]] = numpy.average(init_sum)
-
+			ema_dict[self.daily_candles.keys()[time_period-1]] = {"ema":numpy.average(init_sum)}
 			for day in range(time_period,len(self.daily_candles.keys())):
 				current_value = float(self.daily_candles.values()[day][series_type])
-				previous_day = ema_dict[self.daily_candles.keys()[day-1]]
-				ema_dict[self.daily_candles.keys()[day]] = ((current_value - previous_day) * multiplier) + previous_day
+				previous_day = ema_dict[self.daily_candles.keys()[day-1]]["ema"]
+				ema_dict[self.daily_candles.keys()[day]] = {"ema":((current_value - previous_day) * multiplier) + previous_day}
 
 			return ema_dict
 		else:
@@ -391,7 +383,7 @@ class Coin:
 			macd_histogram = OrderedDict()
 
 			for key in slow_period_data.keys(): #calculates macd_line
-				macd_line[key] = fast_period_data[key] - slow_period_data[key]
+				macd_line[key] = fast_period_data[key]["ema"] - slow_period_data[key]["ema"]
 
 			init_sum = []#used for signal_line sum		
 			for i in range(signal_period):#initializes the signal_line data
@@ -437,7 +429,7 @@ class Coin:
 			gain = gain/time_period
 			loss = loss/time_period
 
-			rsi[self.daily_candles.keys()[time_period-1]] = 100 - (100 / (1 +(gain/loss)))#sets the first day rsi
+			rsi[self.daily_candles.keys()[time_period-1]] = {"rsi":100 - (100 / (1 +(gain/loss)))}#sets the first day rsi
 			
 			for day in range(time_period,len(self.daily_candles.keys())):
 				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
@@ -449,8 +441,8 @@ class Coin:
 					loss = (loss * (time_period - 1) + abs(value)) / time_period
 					gain = (gain * (time_period - 1)) / time_period
 
-				rsi[self.daily_candles.keys()[day]] = 100 - (100 / (1 +(gain/loss)))
-
+				rsi[self.daily_candles.keys()[day]] = {"rsi":100 - (100 / (1 +(gain/loss)))}
+			
 			return rsi
 
 		else:
@@ -478,10 +470,10 @@ class Coin:
 			#fastk requires the rsi, slowk requires fastk and slowd requires slowk.
 			for day in initial_data.keys():
 				if len(rsi_list) < time_period: #first create the list of rsi values to average depending on the time period
-					rsi_list.append(initial_data[day]) 
+					rsi_list.append(initial_data[day]["rsi"]) 
 
 				if len(rsi_list) == time_period:
-					fastk_calc = ((initial_data[day] - min(rsi_list))/(max(rsi_list) - min(rsi_list))) * 100
+					fastk_calc = ((initial_data[day]["rsi"] - min(rsi_list))/(max(rsi_list) - min(rsi_list))) * 100
 					rsi_list.pop(0) #removes the first value for the next value to be appended
 					
 					if len(fastk) < slowk_period: #creates the fastk list to average later for the slowk
@@ -526,7 +518,7 @@ class Coin:
 					
 					mean_dev = mean_dev / time_period
 					
-					cci[day] = (tp - tp_avg)/(constant * mean_dev)
+					cci[day] = {"cci":(tp - tp_avg)/(constant * mean_dev)}
 					tp_sma.pop(0) #need to remove the first value due to moving average
 					mean_dev = 0
 
@@ -574,3 +566,6 @@ class Graph:
 		ax1.plot()
 		plt.show()
 		
+a = Coin(1)
+a.get_historical_data("20180501")
+print(a.panda_df(a.cci()))
