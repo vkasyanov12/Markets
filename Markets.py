@@ -8,7 +8,10 @@ import dateparser
 import datetime
 from datetime import timedelta
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
+import pandas as pd
+from pandas.io.json import json_normalize
 import numpy
+import matplotlib.pyplot as plt
 
 '''
 works only with python 2.7
@@ -261,7 +264,7 @@ class Coin:
 		'''
 			Pulls historical data of a cryptocurrency between two dates provided. Coinmarketcap
 			does not have historical data api, so an html parser was used in order
-			to pull the data and return it as a json value.
+			to pull the data and return it as a ordered_dict.
 			@param start_date (string): The begining date of the quotes. format: "YYYYmmdd", Accepted values: Dates greater than 20130428
 			@param end_date (string): The end date of when to stop pulling quotes. format: "YYYYmmdd" Accepted values: Dates before current date
 		'''
@@ -271,8 +274,7 @@ class Coin:
 		soup = BeautifulSoup(raw_html.read(),"html.parser")
 
 		history = soup.find("table",attrs = {"table"})
-		headings = [th.get_text().replace("*","").lower() for th in history.find("tr").find_all("th")]
-
+		headings = [th.get_text().replace("*","").replace(" ","").lower() for th in history.find("tr").find_all("th")]
 		json_data = OrderedDict()
 		data = {}
 		count = 0 #this is used to determine which column is being used
@@ -282,7 +284,7 @@ class Coin:
 			if count == 0:
 				#Creates the date as the key
 				date = str(dateparser.parse(td.text.strip())).split(" ")[0]
-				json_data[date] = ""
+				json_data[date] = []
 				count+=1
 			elif count == len(headings)-1:
 				#the final column gets assigned and gets put into the json dictionary
@@ -298,6 +300,22 @@ class Coin:
 
 		self.daily_candles = json_data     
 		return json_data
+
+	def panda_df(self):
+		'''Creates a panda dataframe out of the candle data provided'''
+		df = pd.DataFrame(columns = [self.daily_candles.values()[0].keys()],
+									index = [self.daily_candles.keys()])#creates the df with json columns and dates as indeces
+		
+		for i in range(df.shape[0]):
+			row_data = self.daily_candles.values()[i]
+			df.iloc[i].volume = row_data['volume']
+			df.iloc[i].marketcap = row_data['marketcap']
+			df.iloc[i].high = row_data['high']
+			df.iloc[i].low = row_data['low']
+			df.iloc[i].close = row_data['close']
+			df.iloc[i].open = row_data['open']
+
+		return df
 
 	def check_intervals(self,time_period):
 		'''
@@ -324,7 +342,7 @@ class Coin:
 					sma_sum.append(float(self.daily_candles.values()[day][series_type]))
 
 				if len(sma_sum) == time_period:
-					sma_dict[self.daily_candles.keys()[day]] = sum(sma_sum) / time_period
+					sma_dict[self.daily_candles.keys()[day]] = numpy.average(sma_sum)
 					sma_sum.pop(0)
 
 			return sma_dict
@@ -345,7 +363,7 @@ class Coin:
 			for day in range(time_period): #initializes the begining value for the ema
 				init_sum.append(float(self.daily_candles.values()[day][series_type]))
 
-			ema_dict[self.daily_candles.keys()[time_period-1]] = sum(init_sum) / time_period
+			ema_dict[self.daily_candles.keys()[time_period-1]] = numpy.average(init_sum)
 
 			for day in range(time_period,len(self.daily_candles.keys())):
 				current_value = float(self.daily_candles.values()[day][series_type])
@@ -379,18 +397,19 @@ class Coin:
 			for i in range(signal_period):#initializes the signal_line data
 				init_sum.append(macd_line.values()[i])
 			
-			signal_line[macd_line.keys()[signal_period-1]] = sum(init_sum) / signal_period
+			signal_line[macd_line.keys()[signal_period-1]] = numpy.average(init_sum)
 			multiplier = multiplier = (2.0 / (signal_period + 1)) 
 
 			for day in range(signal_period,len(macd_line.keys())):#calculates signal_line
 				current_value = macd_line.values()[day]
 				previous_day = signal_line[macd_line.keys()[day-1]]
 				signal_line[macd_line.keys()[day]] = ((current_value - previous_day) * multiplier) + previous_day
-				
+				macd_histogram[macd_line.keys()[day]] = macd_line[macd_line.keys()[day]] - signal_line[macd_line.keys()[day]]	
+			
 			for key in signal_line.keys(): #calculates macd_histogram and assigns all values to macd
 				macd_histogram[key] = macd_line[key] - signal_line[key]
 				macd[key] = {'macd_line':macd_line[key], 'signal_line':signal_line[key],'macd_histogram':macd_histogram[key]} 
-				
+			
 			return macd
 		
 		else:
@@ -500,7 +519,7 @@ class Coin:
 					tp_sma.append(tp)
 
 				if len(tp_sma) == time_period:
-					tp_avg = sum(tp_sma) / time_period
+					tp_avg = numpy.average(tp_sma)
 					
 					for value in tp_sma: #calculates the mean deviation
 						mean_dev += abs(tp_avg - value)
@@ -533,7 +552,7 @@ class Coin:
 					sma_band.append(float(self.daily_candles[day][series_type])) #adds to the list in order to sum up later
 
 				if len(sma_band) == time_period:
-					bband_avg = sum(sma_band) / time_period #calculates middle band
+					bband_avg = numpy.average(sma_band)  #calculates middle band
 					bbands[day] = {"middle_band": bband_avg,
 								   "upper_band":bband_avg+(numpy.std(sma_band)*nbdevup),  
 								   "lower_band":bband_avg-(numpy.std(sma_band)*nbdevup)}
@@ -543,3 +562,15 @@ class Coin:
 			return bbands
 		else:
 			return "Not enough data points"
+
+class Graph:
+	def __init__(self):
+		dunno = None
+
+	def test(self):
+		ax1 = plt.subplot2grid((6,1), (0,0), rowspan = 5, colspan = 1)
+		ax2 = plt.subplot2grid((6,1), (5,0), rowspan = 1, colspan = 1)
+
+		ax1.plot()
+		plt.show()
+		
