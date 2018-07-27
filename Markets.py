@@ -103,7 +103,7 @@ class Stock:
 		'''
 		Initializes the Stock Object
 		@param ticker (string): Ticker of the stock. 
-		@param candle_time (string): Canlestick length. Default "Daily", Accepted Values: "Intra","Daily","Weekly","Monthly"
+		@param candle_time (string): Canlestick length. Default "Daily", Accepted Values: "Intra","Daily"
 		@param interval (int): When candle_time = "Intra", a time needs to be entered in minutes for each candle stick. Default value = 5, Accepted Values: 1,5,15,30,60
 		'''
 		self.__apikey = "&apikey=50EK1RZLJ0GSEQ4K"
@@ -113,9 +113,9 @@ class Stock:
 		self._interval = str(interval)
 		self._time_series = { 
 			"intra" : "TIME_SERIES_INTRADAY&symbol=",
-			"daily" : "TIME_SERIES_DAILY&symbol=",
-			"weekly" : "TIME_SERIES_WEEKLY&symbol=",
-			"monthly" : "TIME_SERIES_MONTHLY&symbol="}
+			"daily" : "TIME_SERIES_DAILY&symbol="}
+			#"weekly" : "TIME_SERIES_WEEKLY&symbol=",
+			#"monthly" : "TIME_SERIES_MONTHLY&symbol="}
 		self._indicators = {
 			"SMA" : "SMA&symbol=",
 			"EMA" : "EMA&symbol=",
@@ -125,60 +125,94 @@ class Stock:
 			"CCI" : "CCI&symbol=",
 			"BBANDS" : "BBANDS&symbol="}
 
+	def data_compliance(self,data,data_type):
+		'''
+		Returns the proper data type for the user based upon the type preferred.
+		@param data (ordered_dict or dict): Data in form of a dictionary
+		'''
+		data = OrderedDict(reversed(list(data.items()))) #must first reverse the data where oldest comes first then recent
+
+		if data_type == 0: #returns json
+			return json.dumps(data)
+		else:
+			frames = []
+			for day in data.keys(): #builds the panda dataframe
+				df = pd.DataFrame(data[day],index = [day])
+				frames.append(df)
+			return pd.concat(frames)
+
 	def quote(self):
 		'''
 		returns the current price,volume etc... of the stock
 		'''
 		url = self._base_url+"BATCH_STOCK_QUOTES&symbols="+self._ticker+self.__apikey
-		return json.loads(requests.get(url).text,object_pairs_hook = OrderedDict)
+		return requests.get(url).json()["Stock Quotes"][0]['2. price']
 
-	def historical_data(self):
+	def historical_data(self,data_type = 0):
 		'''
 		Queries the stock price based upon the candlestick time
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
 		if self._candle_time == "intra":#The url needs to change slightly if it's intra day.
 			url = self._base_url+self._time_series[self._candle_time]+self._ticker+"&interval="+self._interval+"min"+self.__apikey
+			data = json.loads(requests.get(url).text,object_pairs_hook = OrderedDict)['Time Series ('+self._interval+'min)'] 
 		else:
 			url = self._base_url+self._time_series[self._candle_time]+self._ticker+self.__apikey 
-		return json.loads(requests.get(url).text,object_pairs_hook = OrderedDict)
+			data = json.loads(requests.get(url).text,object_pairs_hook = OrderedDict)['Time Series ('+self._candle_time.capitalize()+')']
+
+		return self.data_compliance(data,data_type)
 
 	def indicator_builder(self,indicator):
 		'''
 		Builds the begining of the URL for specific indicators. 
-		@param indicator String: Specific indicator to query. 
+		@param indicator String: Specific indicator to query.
 		'''
 		if self._candle_time == "intra":#The url needs to change slightly if it's intra day.
 			return self._base_url+self._indicators[indicator]+self._ticker+"&interval="+self._interval+"min"
 		else:
 			return self._base_url+self._indicators[indicator]+self._ticker+"&interval="+self._candle_time
 
-	def sma(self,time_period = 10,series_type = "close"):
+	def sma(self,time_period = 10,series_type = "close",data_type = 0):
 		'''
 		Queries the Simple Moving Average on the stock.
 		@param time_period (int): number of data points used to calculate each moving average value. Default = 10, Accepted Values: Positive values
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("SMA")+"&time_period="+str(time_period)+"&series_type="+series_type.lower()+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("SMA")+
+							"&time_period="+str(time_period)+"&series_type="+
+							series_type.lower()+self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: SMA']
+		
+		return self.data_compliance(data,data_type)
 
-	def ema(self,time_period = 200,series_type = "close"):
+	def ema(self,time_period = 200,series_type = "close",data_type = 0):
 		'''
 		Queries the Exponential Moving Average on the stock.
 		@param time_period (int): number of data points used to calculate each moving average value. Default = 200, Accepted Values: Positive values
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("EMA")+"&time_period="+str(time_period)+"&series_type="+series_type.lower()+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("EMA")+"&time_period="+
+									   str(time_period)+"&series_type="+series_type.lower()+
+									   self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: EMA']
+		
+		return self.data_compliance(data,data_type)
 
-	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close"):
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",data_type = 0):
 		'''
 		Queries the Moving Average Convergence/Divergence on the stock
 		@param fast_period (int). Default = 12, Accepted Values: Positive integers
 		@param slow_period (int). Default = 26, Accepted Values: Positive integers
 		@param signal_period (int). Default = 9, Accepted Values: Positive integers
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("MACD")+"&series_type="+series_type+"&fastperiod="+
-			   str(fast_period)+"&slowperiod="+str(slow_period)+"&signalperiod="+str(signal_period)+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("MACD")+"&series_type="+series_type+"&fastperiod="+
+			   						str(fast_period)+"&slowperiod="+str(slow_period)+"&signalperiod="+
+			   						str(signal_period)+self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: MACD']
 
-	def stoch(self,fastk_period = 5,slowk_period = 3,slowd_period = 3,slowk_matype = 0,slowd_matype = 0):
+		return self.data_compliance(data,data_type)
+
+	def stoch(self,fastk_period = 5,slowk_period = 3,slowd_period = 3,slowk_matype = 0,slowd_matype = 0,data_type = 0):
 		'''
 		Quries the Stochastic Oscillator
 		@param fastk_period (int): Time period of the fastk moving average. Default = 5, Accepted Values: Positive integers	
@@ -192,26 +226,38 @@ class Stock:
 		Accepted Values: 0 = Simple Moving Average (SMA), 1 = Exponential Moving Average (EMA), 2 = Weighted Moving Average (WMA), 
 		3 = Double Exponential Moving Average (DEMA), 4 = Triple Exponential Moving Average (TEMA), 
 		5 = Triangular Moving Average (TRIMA), 6 = T3 Moving Average, 7 = Kaufman Adaptive Moving Average (KAMA), 8 = MESA Adaptive Moving Average (MAMA)
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("STOCH")+"&fastkperiod="+str(fastk_period)+"&slowkperiod="+str(slowk_period)+"&slowdperiod="+
-			   str(slowd_period)+"&slowkmatype="+str(slowk_matype)+"&slowdmatype="+str(slowd_matype)+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("STOCH")+"&fastkperiod="+str(fastk_period)+"&slowkperiod="+
+										str(slowk_period)+"&slowdperiod="+str(slowd_period)+"&slowkmatype="+str(slowk_matype)+
+										"&slowdmatype="+str(slowd_matype)+self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: STOCH']
+		
+		return self.data_compliance(data,data_type)
 
-	def rsi(self,time_period = 14,series_type = "close"):
+	def rsi(self,time_period = 14,series_type = "close",data_type = 0):
 		'''
 		Queries the Relative Strength Index
 		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
 		@param series_type (string): Price type in the time series. Default = "close", Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("RSI")+"&time_period="+str(time_period)+"&series_type="+series_type+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("RSI")+"&time_period="+str(time_period)+"&series_type="+
+										series_type+self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: RSI']
 
-	def cci(self,time_period = 60):
+		return self.data_compliance(data,data_type)
+
+	def cci(self,time_period = 60,data_type = 0):
 		'''
 		Queries the Commodity Channel Index.
 		@param time_period (int): Number of data points to calculate CCI. Default = 60, Accepted Values: Positive Integers
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("CCI")+"&time_period="+str(time_period)+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("CCI")+"&time_period="+str(time_period)+
+									   self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: CCI']
+		
+		return self.data_compliance(data,data_type)
 
-	def bbands(self,time_period = 60,series_type = "close",nbdevup = 2,nbdevdn = 2,matype = 0):
+	def bbands(self,time_period = 60,series_type = "close",nbdevup = 2,nbdevdn = 2,matype = 0,data_type = 0):
 		'''
 		Queries the Bollinger Bands.
 		@param time_period (int): Number of data points used to calculate BBands. Default = 60. Accepted Values: Positive integers
@@ -222,9 +268,14 @@ class Stock:
 		Accepted Values: 0 = Simple Moving Average (SMA), 1 = Exponential Moving Average (EMA), 2 = Weighted Moving Average (WMA), 
 		3 = Double Exponential Moving Average (DEMA), 4 = Triple Exponential Moving Average (TEMA), 5 = Triangular Moving Average (TRIMA), 
 		6 = T3 Moving Average, 7 = Kaufman Adaptive Moving Average (KAMA), 8 = MESA Adaptive Moving Average (MAMA)
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
-		return json.loads(requests.get(self.indicator_builder("BBANDS")+"&time_period="+str(time_period)+"&series_type="+
-			   series_type+"&nbdevup="+str(nbdevup)+"&nbdevdn="+str(nbdevdn)+"&matype="+str(matype)+self.__apikey).text,object_pairs_hook = OrderedDict)
+		data = json.loads(requests.get(self.indicator_builder("BBANDS")+"&time_period="+str(time_period)+"&series_type="+
+			   							series_type+"&nbdevup="+str(nbdevup)+"&nbdevdn="+str(nbdevdn)+"&matype="+
+			   							str(matype)+self.__apikey).text,object_pairs_hook = OrderedDict)['Technical Analysis: BBANDS']
+
+		return self.data_compliance(data,data_type)
+
 class Coin:
 	'''
 	This is an api for coinmarketcap.com. It pulls current and historical data from the website
@@ -234,14 +285,16 @@ class Coin:
 		'''
 		inititializes the object
 		@param coin_id (int): cryptocurrency id from coinmarketcap.com. This reliant on Market class. Accepted Values: Positive integers
+		@@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
 		self._base_url = 'https://api.coinmarketcap.com/v2/'
 		self._id = coin_id
 		self._symbol = None
 		self._website_slug = None 
 		self._name = None
+		self.daily_candles = None
 		self.get_info(coin_id)
-		self.daily_candles = self.get_historical_data()
+		self.get_historical_data()
 
 	def get_info(self,coin_id):
 		'''
@@ -260,13 +313,14 @@ class Coin:
 		'''
 		return requests.get(self._base_url+'ticker/'+str(self._id)+'/').json()["data"]["quotes"]
 
-	def get_historical_data(self,start_date = (datetime.datetime.now() - timedelta(days=30)).strftime('%Y%m%d'), end_date = datetime.datetime.now().strftime('%Y%m%d')):
+	def get_historical_data(self,start_date = (datetime.datetime.now() - timedelta(days=30)).strftime('%Y%m%d'), end_date = datetime.datetime.now().strftime('%Y%m%d'),data_type = 2):
 		'''
 			Pulls historical data of a cryptocurrency between two dates provided. Coinmarketcap
 			does not have historical data api, so an html parser was used in order
 			to pull the data and return it as a ordered_dict.
 			@param start_date (string): The begining date of the quotes. format: "YYYYmmdd", Accepted values: Dates greater than 20130428
 			@param end_date (string): The end date of when to stop pulling quotes. format: "YYYYmmdd" Accepted values: Dates before current date
+			@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe
 		'''
 
 		url = 'https://coinmarketcap.com/currencies/'+self._website_slug+'/historical-data/?start='+start_date+'&end='+end_date
@@ -275,7 +329,7 @@ class Coin:
 
 		history = soup.find("table",attrs = {"table"})
 		headings = [th.get_text().replace("*","").replace(" ","").lower() for th in history.find("tr").find_all("th")]
-		json_data = OrderedDict()
+		candle_data = OrderedDict()
 		data = {}
 		count = 0 #this is used to determine which column is being used
 		date = ""
@@ -284,31 +338,39 @@ class Coin:
 			if count == 0:
 				#Creates the date as the key
 				date = str(dateparser.parse(td.text.strip())).split(" ")[0]
-				json_data[date] = []
+				candle_data[date] = []
 				count+=1
 			elif count == len(headings)-1:
 				#the final column gets assigned and gets put into the json dictionary
 				data[headings[count]] = td.text.strip()
-				json_data[date] = data
+				candle_data[date] = data
 				data = {}
 				count = 0
 			else:
 				data[headings[count]] = td.text.strip()
 				count+=1
 		
-		json_data = OrderedDict(reversed(list(json_data.items()))) #reversed it in order to have the most recent items on the bottom
+		candle_data = OrderedDict(reversed(list(candle_data.items()))) #reversed it in order to have the most recent items on the bottom
+		self.daily_candles = candle_data
 
-		self.daily_candles = json_data     
-		return json_data
+		return self.data_compliance(candle_data,data_type)
 
-	def panda_df(self,data):
-		'''Creates a panda dataframe out of the candle data provided'''
-		frames = []
-		for day in data.keys():
-			df = pd.DataFrame(data[day],index = [day])
-			frames.append(df)
-		
-		return pd.concat(frames)
+	def data_compliance(self,data,data_type):
+		'''
+		Returns the proper data type for the user based upon the type preferred.
+		@param data (ordered_dict or dict): Data in form of a dictionary
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		'''
+		if data_type == 0: #returns json
+			return json.dumps(data)
+		elif data_type == 1:
+			frames = []
+			for day in data.keys(): #builds the panda dataframe
+				df = pd.DataFrame(data[day],index = [day])
+				frames.append(df)
+			return pd.concat(frames)
+		else:
+			return data
 		
 	def check_intervals(self,time_period):
 		'''
@@ -320,11 +382,12 @@ class Coin:
 		else:
 			return False
 
-	def sma(self,time_period = 10, series_type = "close"):
+	def sma(self,time_period = 10, series_type = "close",data_type = 2):
 		'''
 		Queries the Simple Moving Average on the Coin
 		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		sma_dict = OrderedDict()
 		sma_sum = [] 
@@ -338,15 +401,16 @@ class Coin:
 					sma_dict[self.daily_candles.keys()[day]] = {"sma":numpy.average(sma_sum)}
 					sma_sum.pop(0)
 
-			return sma_dict
+			return self.data_compliance(sma_dict,data_type)
 		else:
 			return "Not enough data points"
 
-	def ema(self,time_period = 10, series_type = "close"):
+	def ema(self,time_period = 10, series_type = "close",data_type = 2):
 		'''
 		Queries the Exponential Moving Average on the Coin.
 		@param time_period (int): number of data points used to calculate each moving average value. Default = 10, Accepted Values: Positive values
 		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		ema_dict = OrderedDict()
 		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
@@ -362,21 +426,22 @@ class Coin:
 				previous_day = ema_dict[self.daily_candles.keys()[day-1]]["ema"]
 				ema_dict[self.daily_candles.keys()[day]] = {"ema":((current_value - previous_day) * multiplier) + previous_day}
 
-			return ema_dict
+			return self.data_compliance(ema_dict,data_type)
 		else:
 			return "Not enough data points"
 
-	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close"):
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",data_type=2):
 		'''
 		Queries the Moving Average Convergence/Divergence on the Coin
 		@param fast_period (int). Default = 12, Accepted Values: Positive integers
 		@param slow_period (int). Default = 26, Accepted Values: Positive integers
 		@param signal_period (int). Default = 9, Accepted Values: Positive integers
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		if self.check_intervals(slow_period+signal_period):#checks to make sure there is enough data points
-			
-			fast_period_data = self.ema(fast_period,series_type)
-			slow_period_data = self.ema(slow_period,series_type)
+	
+			fast_period_data = self.ema(fast_period, series_type)
+			slow_period_data = self.ema(slow_period, series_type)
 			macd = OrderedDict() #holds macd_line,signal_line,macd_histogram
 			macd_line = OrderedDict()
 			signal_line = OrderedDict()
@@ -402,16 +467,17 @@ class Coin:
 				macd_histogram[key] = macd_line[key] - signal_line[key]
 				macd[key] = {'macd_line':macd_line[key], 'signal_line':signal_line[key],'macd_histogram':macd_histogram[key]} 
 			
-			return macd
+			return self.data_compliance(macd,data_type)
 		
 		else:
 			return "Not enough data points"
 
-	def rsi(self,time_period = 14, series_type = "close"):
+	def rsi(self,time_period = 14, series_type = "close",data_type = 2):
 		'''
 		Queries the Relative Strength Index
 		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
 		@param series_type (string): Price type in the time series. Default = "close", Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		gain = 0 #used to measure average gain
 		loss = 0 #used to measure average loss
@@ -443,19 +509,20 @@ class Coin:
 
 				rsi[self.daily_candles.keys()[day]] = {"rsi":100 - (100 / (1 +(gain/loss)))}
 			
-			return rsi
+			return self.data_compliance(rsi,data_type)
 
 		else:
 			return "Not enough data points"
 
 
-	def stoch(self,slowk_period = 3, slowd_period = 3,time_period = 14, series_type = "close"):
+	def stoch(self,slowk_period = 3, slowd_period = 3,time_period = 14, series_type = "close",data_type = 2):
 		'''
 		Quries the Stochastic Oscillator on the Coin
 		@param slowk_period (int): Time period of the slowk moving average. Default = 3, Accepted Values: Positive integers
 		@param slowd_period (int): Time period of the slowd moving average. Default = 3, Accepted Values: Positive integers
 		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
 		@param series_type (string): Price type in the time series for the rsi. Default = "close", Accepted Values: "close","open","high","low"
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 
 		NOTE:THE CALCULATIONS SEEM TO BE OFF, CHECK LATER WHEN GRAPH IS IMPLEMENTED
 		'''
@@ -488,14 +555,16 @@ class Coin:
 							slowd_calc = sum(slowk) / slowd_period
 							stoch[day] = {"slowk_k" : slowk_calc, "slow_d" : slowd_calc}
 							slowk.pop(0)
-			return stoch
+			
+			return self.data_compliance(stoch,data_type)
 		else:
 			return "Not enough data points"
 
-	def cci(self,time_period = 20):
+	def cci(self,time_period = 20,data_type = 2):
 		'''
 		Queries the Commodity Channel Index on the Coin.
 		@param time_period (int): Number of data points to calculate CCI. Default = 20, Accepted Values: Positive Integers
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		constant = .015
 		tp_sma = [] 
@@ -522,17 +591,18 @@ class Coin:
 					tp_sma.pop(0) #need to remove the first value due to moving average
 					mean_dev = 0
 
-			return cci
+			return self.data_compliance(cci,data_type)
 		else:
 			return "Not enough data points"
 
-	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2):
+	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2,data_type = 2):
 		'''
 		Queries the Bollinger Bands on the coin.
 		@param time_period (int): Number of data points used to calculate BBands. Default = 60. Accepted Values: Positive integers
 		@param series_type (string): Desired price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
 		@param nbdevup (int): Standard deviation multiplier of the upper band. Default = 2. Accepted Values: Positive integers
 		@param nbdevdn (int): Standard deviation multiplier of the lower band. Default = 2. Accepted Values: Positive integers
+		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
 		'''
 		bbands = OrderedDict()
 		sma_band = [] 
@@ -551,7 +621,7 @@ class Coin:
 
 					sma_band.pop(0)
 
-			return bbands
+			return self.data_compliance(bbands,data_type)
 		else:
 			return "Not enough data points"
 
@@ -565,7 +635,3 @@ class Graph:
 
 		ax1.plot()
 		plt.show()
-		
-a = Coin(1)
-a.get_historical_data("20180501")
-print(a.panda_df(a.cci()))
