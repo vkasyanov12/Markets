@@ -1,8 +1,8 @@
 import json
 import requests
+from urllib.request import urlopen
 from collections import OrderedDict
 from bs4 import BeautifulSoup
-import urllib2
 import collections
 import dateparser
 import datetime
@@ -10,8 +10,14 @@ from datetime import timedelta
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
 import pandas as pd
 from pandas.io.json import json_normalize
-import numpy
+import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import style
+#from matplotlib.finance import candlestick2_ohlc
+import matplotlib.ticker as mticker
+import matplotlib.dates as mdates
+
+style.use('ggplot')
 
 '''
 works only with python 2.7
@@ -292,9 +298,10 @@ class Coin:
 		self._symbol = None
 		self._website_slug = None 
 		self._name = None
-		self.daily_candles = None
+		self.candles = None
 		self.get_info(coin_id)
-		self.get_historical_data()
+		self.historical_data()
+		self.ta = Technical_Analysis(self.candles)
 
 	def get_info(self,coin_id):
 		'''
@@ -311,9 +318,9 @@ class Coin:
 		'''
 		returns the current quote
 		'''
-		return requests.get(self._base_url+'ticker/'+str(self._id)+'/').json()["data"]["quotes"]
+		return requests.get(self._base_url+'ticker/'+str(self._id)+'/').json()["data"]["quotes"]['USD']['price']
 
-	def get_historical_data(self,start_date = (datetime.datetime.now() - timedelta(days=30)).strftime('%Y%m%d'), end_date = datetime.datetime.now().strftime('%Y%m%d'),data_type = 2):
+	def historical_data(self,start_date = (datetime.datetime.now() - timedelta(days=30)).strftime('%Y%m%d'), end_date = datetime.datetime.now().strftime('%Y%m%d'),data_type = 2):
 		'''
 			Pulls historical data of a cryptocurrency between two dates provided. Coinmarketcap
 			does not have historical data api, so an html parser was used in order
@@ -324,7 +331,7 @@ class Coin:
 		'''
 
 		url = 'https://coinmarketcap.com/currencies/'+self._website_slug+'/historical-data/?start='+start_date+'&end='+end_date
-		raw_html = urllib2.urlopen(url)
+		raw_html = urlopen(url)
 		soup = BeautifulSoup(raw_html.read(),"html.parser")
 
 		history = soup.find("table",attrs = {"table"})
@@ -335,303 +342,181 @@ class Coin:
 		date = ""
 		#this gets all the rows from the table. It is one constant stream of data
 		for td in history.find_all("td"):
+			value = td.text.strip()
 			if count == 0:
 				#Creates the date as the key
-				date = str(dateparser.parse(td.text.strip())).split(" ")[0]
+				date = str(dateparser.parse(value)).split(" ")[0]
 				candle_data[date] = []
 				count+=1
 			elif count == len(headings)-1:
 				#the final column gets assigned and gets put into the json dictionary
-				data[headings[count]] = td.text.strip()
+				data[headings[count]] = int(value.replace(",",""))
 				candle_data[date] = data
 				data = {}
 				count = 0
 			else:
-				data[headings[count]] = td.text.strip()
+				data[headings[count]] = float(value.replace(",",""))
 				count+=1
 		
 		candle_data = OrderedDict(reversed(list(candle_data.items()))) #reversed it in order to have the most recent items on the bottom
-		self.daily_candles = candle_data
 
-		return self.data_compliance(candle_data,data_type)
+		frames = []
+		for day in candle_data.keys(): #builds the panda dataframe
+			df = pd.DataFrame(candle_data[day],index = [day])
+			frames.append(df)
 
-	def data_compliance(self,data,data_type):
-		'''
-		Returns the proper data type for the user based upon the type preferred.
-		@param data (ordered_dict or dict): Data in form of a dictionary
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
-		'''
-		if data_type == 0: #returns json
-			return json.dumps(data)
-		elif data_type == 1:
-			frames = []
-			for day in data.keys(): #builds the panda dataframe
-				df = pd.DataFrame(data[day],index = [day])
-				frames.append(df)
-			return pd.concat(frames)
-		else:
-			return data
-		
+		self.candles =  pd.concat(frames)
+		return self.candles
+
+	def sma(self,time_period = 10, series_type = "close"):
+		return self.ta.sma(time_period,series_type)
+
+	def ema(self,time_period = 10, series_type = "close"):
+		return self.ta.ema(time_period,series_type)
+
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close"):
+		return self.ta.macd(fast_period,slow_period,signal_period,series_type)
+
+	def rsi(self,time_period = 14, series_type = "close"):
+		return self.ta.rsi(time_period,series_type)
+
+	def cci(self,time_period = 20):
+		return self.ta.cci(time_period)
+
+	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2):
+		return self.ta.bbands(time_period,series_type,nbdevup,nbdevdn)
+
+	def graph(self,indicators=[]):
+		graph = Graph(self.graph_builder())
+		graph.test()
+
+class Technical_Analysis:
+	'''
+	This is holds code for Technical Analasis on prices.
+	The class needs to first take in a pandas dataframe consisting of closing,open,high,low prices.
+	'''
+	def __init__(self,df):
+		self.candles = df
+
 	def check_intervals(self,time_period):
 		'''
 		Checks to make sure there are enough candle stick data for the time period
 		@param time_period (int): amount of data points one desires to check
 		'''
-		if time_period <= len(self.daily_candles.keys()):
+		if time_period <= len(self.candles.index):
 			return True
 		else:
 			return False
 
-	def sma(self,time_period = 10, series_type = "close",data_type = 2):
+	def sma(self,time_period, series_type):
 		'''
 		Queries the Simple Moving Average on the Coin
-		@param time_period (int): amount of data points one desires to use. Default = 10, Accepted Values: Positive Integers
-		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		@param time_period (int): amount of data points one desires to use. 
+		@param series_type (string): The price type in the time series. 
 		'''
-		sma_dict = OrderedDict()
-		sma_sum = [] 
 
 		if self.check_intervals(time_period):
-			for day in range(len(self.daily_candles.keys())):
-				if len(sma_sum) < time_period:
-					sma_sum.append(float(self.daily_candles.values()[day][series_type]))
-
-				if len(sma_sum) == time_period:
-					sma_dict[self.daily_candles.keys()[day]] = {"sma":numpy.average(sma_sum)}
-					sma_sum.pop(0)
-
-			return self.data_compliance(sma_dict,data_type)
+			value = self.candles[series_type].rolling(window=time_period).mean()
+			return pd.DataFrame(value.values,index=value.index,columns=['sma_'+str(time_period)]).dropna()
 		else:
-			return "Not enough data points"
+			return "Not enough data points, try to get more historical data"
 
-	def ema(self,time_period = 10, series_type = "close",data_type = 2):
+	def ema(self,time_period,series_type):
 		'''
-		Queries the Exponential Moving Average on the Coin.
-		@param time_period (int): number of data points used to calculate each moving average value. Default = 10, Accepted Values: Positive values
-		@param series_type (string): The price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		Queries the Exponential Moving Average
+		@param time_period (int): number of data points used to calculate each moving average value.
+		@param series_type (string): The price type in the time series.
 		'''
-		ema_dict = OrderedDict()
-		init_sum = [] #used to calculate the initial begining sum for ema, first time_period sma
-		multiplier = (2.0 / (time_period + 1)) 
-
-		if self.check_intervals(time_period):#checks if there is enough intervals for calculation		
-			for day in range(time_period): #initializes the begining value for the ema
-				init_sum.append(float(self.daily_candles.values()[day][series_type]))
-
-			ema_dict[self.daily_candles.keys()[time_period-1]] = {"ema":numpy.average(init_sum)}
-			for day in range(time_period,len(self.daily_candles.keys())):
-				current_value = float(self.daily_candles.values()[day][series_type])
-				previous_day = ema_dict[self.daily_candles.keys()[day-1]]["ema"]
-				ema_dict[self.daily_candles.keys()[day]] = {"ema":((current_value - previous_day) * multiplier) + previous_day}
-
-			return self.data_compliance(ema_dict,data_type)
+		if self.check_intervals(time_period):
+			sma = self.candles[series_type].rolling(window=time_period,min_periods=time_period).mean()[:time_period]
+			rest = self.candles[series_type][time_period:]
+			ema = pd.concat([sma,rest]).ewm(span=time_period,adjust=False).mean()
+			return pd.DataFrame(ema.values,index=ema.index,columns=['ema_'+str(time_period)]).dropna()
 		else:
-			return "Not enough data points"
+			return "Not enough data points, try to get more historical data"
 
-	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",data_type=2):
+	def macd(self,fast_period,slow_period,signal_period,series_type):
 		'''
-		Queries the Moving Average Convergence/Divergence on the Coin
-		@param fast_period (int). Default = 12, Accepted Values: Positive integers
-		@param slow_period (int). Default = 26, Accepted Values: Positive integers
-		@param signal_period (int). Default = 9, Accepted Values: Positive integers
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		Queries the Moving Average Convergence/Divergence
+		@param fast_period (int). Default = 12
+		@param slow_period (int). Default = 26
+		@param signal_period (int). Default = 9 
 		'''
-		if self.check_intervals(slow_period+signal_period):#checks to make sure there is enough data points
-	
-			fast_period_data = self.ema(fast_period, series_type)
-			slow_period_data = self.ema(slow_period, series_type)
-			macd = OrderedDict() #holds macd_line,signal_line,macd_histogram
-			macd_line = OrderedDict()
-			signal_line = OrderedDict()
-			macd_histogram = OrderedDict()
-
-			for key in slow_period_data.keys(): #calculates macd_line
-				macd_line[key] = fast_period_data[key]["ema"] - slow_period_data[key]["ema"]
-
-			init_sum = []#used for signal_line sum		
-			for i in range(signal_period):#initializes the signal_line data
-				init_sum.append(macd_line.values()[i])
-			
-			signal_line[macd_line.keys()[signal_period-1]] = numpy.average(init_sum)
-			multiplier = multiplier = (2.0 / (signal_period + 1)) 
-
-			for day in range(signal_period,len(macd_line.keys())):#calculates signal_line
-				current_value = macd_line.values()[day]
-				previous_day = signal_line[macd_line.keys()[day-1]]
-				signal_line[macd_line.keys()[day]] = ((current_value - previous_day) * multiplier) + previous_day
-				macd_histogram[macd_line.keys()[day]] = macd_line[macd_line.keys()[day]] - signal_line[macd_line.keys()[day]]	
-			
-			for key in signal_line.keys(): #calculates macd_histogram and assigns all values to macd
-				macd_histogram[key] = macd_line[key] - signal_line[key]
-				macd[key] = {'macd_line':macd_line[key], 'signal_line':signal_line[key],'macd_histogram':macd_histogram[key]} 
-			
-			return self.data_compliance(macd,data_type)
 		
-		else:
-			return "Not enough data points"
+		if self.check_intervals(slow_period+signal_period):
+			fast_period = self.ema(fast_period,series_type)['ema_'+str(fast_period)]
+			slow_period = self.ema(slow_period,series_type)['ema_'+str(slow_period)]
+			macd_line = (fast_period-slow_period).dropna()
+		
+			init_sum = macd_line.rolling(window=signal_period,min_periods=signal_period).mean()[:signal_period].dropna()
+			rest = macd_line[signal_period:]
+			signal_line = pd.concat([init_sum,rest]).ewm(span=signal_period,adjust=False).mean()
+			
+			macd_histogram = macd_line-signal_line
+			join = pd.concat([macd_line,signal_line,macd_histogram],axis=1,sort=True)
 
-	def rsi(self,time_period = 14, series_type = "close",data_type = 2):
+			return pd.DataFrame(join.values,index=join.index,columns=['macd_line',"signal_line","macd_histogram"])
+		else:
+			return "Not enough data points, try to get more historical data"
+
+	def rsi(self,time_period, series_type):
 		'''
 		Queries the Relative Strength Index
-		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
-		@param series_type (string): Price type in the time series. Default = "close", Accepted Values: "close","open","high","low"
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		@param time_period (int): Number of data points used to calculate the rsi. 
+		@param series_type (string): Price type in the time series. 
 		'''
-		gain = 0 #used to measure average gain
-		loss = 0 #used to measure average loss
-		rsi = OrderedDict() #holds the rsi by date
+		#not finished, still trying to figure out how to calculate rsi properly with pandas
+		value = self.candles[series_type].diff().dropna()
+		gain = value * 0
+		loss = value * 0
 
-		if self.check_intervals(time_period): #checks to make sure there is enough data points
-			for day in range(0,time_period): #need to calculate the initial rsi
-				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
-				
-				if value > 0:
-					gain += value
-				elif value < 0:
-					loss += abs(value)
-				
-			gain = gain/time_period
-			loss = loss/time_period
-
-			rsi[self.daily_candles.keys()[time_period-1]] = {"rsi":100 - (100 / (1 +(gain/loss)))}#sets the first day rsi
-			
-			for day in range(time_period,len(self.daily_candles.keys())):
-				value = float(self.daily_candles.values()[day][series_type]) - float(self.daily_candles.values()[day-1][series_type])
-
-				if value > 0:
-					gain = (gain * (time_period - 1) + value) / time_period
-					loss = (loss * (time_period - 1)) / time_period
-				elif value < 0:
-					loss = (loss * (time_period - 1) + abs(value)) / time_period
-					gain = (gain * (time_period - 1)) / time_period
-
-				rsi[self.daily_candles.keys()[day]] = {"rsi":100 - (100 / (1 +(gain/loss)))}
-			
-			return self.data_compliance(rsi,data_type)
-
-		else:
-			return "Not enough data points"
-
-
-	def stoch(self,slowk_period = 3, slowd_period = 3,time_period = 14, series_type = "close",data_type = 2):
-		'''
-		Quries the Stochastic Oscillator on the Coin
-		@param slowk_period (int): Time period of the slowk moving average. Default = 3, Accepted Values: Positive integers
-		@param slowd_period (int): Time period of the slowd moving average. Default = 3, Accepted Values: Positive integers
-		@param time_period (int): Number of data points used to calculate the rsi. Default = 14, Accepted Values: Positive integers
-		@param series_type (string): Price type in the time series for the rsi. Default = "close", Accepted Values: "close","open","high","low"
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
-
-		NOTE:THE CALCULATIONS SEEM TO BE OFF, CHECK LATER WHEN GRAPH IS IMPLEMENTED
-		'''
-		stoch = OrderedDict() #holds the stoch data
-		initial_data = self.rsi(time_period,series_type) #initial rsi data required in order to calculate stoch
+		gain[value>0] = value[value>0]
+		loss[value<0] = -value[value<0]
 		
-		rsi_list = [] #holds the time_period average
-		fastk = [] #holds fastk calculations
-		slowk = [] #holds the slowk calculations
-		
-		if self.check_intervals(time_period+slowk_period+slowd_period): #checks to see if there is enough data points
-			#fastk requires the rsi, slowk requires fastk and slowd requires slowk.
-			for day in initial_data.keys():
-				if len(rsi_list) < time_period: #first create the list of rsi values to average depending on the time period
-					rsi_list.append(initial_data[day]["rsi"]) 
+		gain[gain.index[time_period-1]] = np.mean(gain[:time_period])
+		loss[loss.index[time_period-1]] = np.mean(loss[:time_period])
 
-				if len(rsi_list) == time_period:
-					fastk_calc = ((initial_data[day]["rsi"] - min(rsi_list))/(max(rsi_list) - min(rsi_list))) * 100
-					rsi_list.pop(0) #removes the first value for the next value to be appended
-					
-					if len(fastk) < slowk_period: #creates the fastk list to average later for the slowk
-						fastk.append(fastk_calc)
-
-					if len(fastk) == slowk_period: #calculates the slowk
-						slowk_calc = sum(fastk) / slowk_period
-						slowk.append(slowk_calc) #adds the slowk list in order to average the slowd later
-						fastk.pop(0)
-
-						if len(slowk) == slowd_period: #calculates the slowd
-							slowd_calc = sum(slowk) / slowd_period
-							stoch[day] = {"slowk_k" : slowk_calc, "slow_d" : slowd_calc}
-							slowk.pop(0)
-			
-			return self.data_compliance(stoch,data_type)
-		else:
-			return "Not enough data points"
-
-	def cci(self,time_period = 20,data_type = 2):
+		gain = gain.drop(gain.index[:(time_period-1)])
+		loss = loss.drop(loss.index[:(time_period-1)])
+	
+	def cci(self,time_period = 20):
 		'''
-		Queries the Commodity Channel Index on the Coin.
-		@param time_period (int): Number of data points to calculate CCI. Default = 20, Accepted Values: Positive Integers
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
+		Queries the Commodity Channel Index 
+		@param time_period (int): Number of data points to calculate CCI.
 		'''
-		constant = .015
-		tp_sma = [] 
-		cci = OrderedDict()
-		mean_dev = 0
-
 		if self.check_intervals(time_period):
-			for day in self.daily_candles.keys():
-				#tp = typical price
-				tp = (float(self.daily_candles[day]["high"]) + float(self.daily_candles[day]["low"]) + float(self.daily_candles[day]["close"])) / 3
-
-				if len(tp_sma) < time_period: #builds the simple moving average
-					tp_sma.append(tp)
-
-				if len(tp_sma) == time_period:
-					tp_avg = numpy.average(tp_sma)
-					
-					for value in tp_sma: #calculates the mean deviation
-						mean_dev += abs(tp_avg - value)
-					
-					mean_dev = mean_dev / time_period
-					
-					cci[day] = {"cci":(tp - tp_avg)/(constant * mean_dev)}
-					tp_sma.pop(0) #need to remove the first value due to moving average
-					mean_dev = 0
-
-			return self.data_compliance(cci,data_type)
+			tp = (self.candles['high'] + self.candles['low']+self.candles['close'])/3
+			cci = (tp - tp.rolling(window=time_period).mean()) / (.015 * tp.rolling(window=time_period).std())
+			return pd.DataFrame(cci.values,index=cci.index,columns=['cci_'+str(time_period)]).dropna()
 		else:
-			return "Not enough data points"
+			return "Not enough data points, try to get more historical data"
 
-	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2,data_type = 2):
-		'''
-		Queries the Bollinger Bands on the coin.
-		@param time_period (int): Number of data points used to calculate BBands. Default = 60. Accepted Values: Positive integers
-		@param series_type (string): Desired price type in the time series. Default = "close". Accepted Values: "close","open","high","low"
-		@param nbdevup (int): Standard deviation multiplier of the upper band. Default = 2. Accepted Values: Positive integers
-		@param nbdevdn (int): Standard deviation multiplier of the lower band. Default = 2. Accepted Values: Positive integers
-		@param data_type (int): Indicates data type to return as for all functions. Accepted Values: 0 = Json, 1 = Pandas Dataframe, 2 = Ordered Python Dictionary
-		'''
-		bbands = OrderedDict()
-		sma_band = [] 
-		bband_avg = 0 #used to calculate the middle_band,upper_band and lowe_band
 
+	def bbands(self,time_period, series_type, nbdevup, nbdevdn):
+		'''
+		Queries the Bollinger Bands
+		@param time_period (int): Number of data points used to calculate BBands. 
+		@param series_type (string): Desired price type in the time series.
+		@param nbdevup (int): Standard deviation multiplier of the upper band. 
+		@param nbdevdn (int): Standard deviation multiplier of the lower band.
+		'''
 		if self.check_intervals(time_period):
-			for day in self.daily_candles.keys():
-				if len(sma_band) < time_period:
-					sma_band.append(float(self.daily_candles[day][series_type])) #adds to the list in order to sum up later
-
-				if len(sma_band) == time_period:
-					bband_avg = numpy.average(sma_band)  #calculates middle band
-					bbands[day] = {"middle_band": bband_avg,
-								   "upper_band":bband_avg+(numpy.std(sma_band)*nbdevup),  
-								   "lower_band":bband_avg-(numpy.std(sma_band)*nbdevup)}
-
-					sma_band.pop(0)
-
-			return self.data_compliance(bbands,data_type)
+			stdev = self.candles[series_type].rolling(window=time_period).std().dropna()
+			middle_band = self.candles[series_type].rolling(window=time_period).mean().dropna()
+			upper_band = middle_band+(stdev*nbdevup)
+			lower_band = middle_band-(stdev*nbdevup)
+			join = pd.concat([middle_band,upper_band,lower_band],axis=1,sort=True)
+			return pd.DataFrame(join.values,index=join.index,columns=['middle_band',"upper_band","lower_band"])
 		else:
-			return "Not enough data points"
-
+			return "Not enough data points, try to get more historical data" 
 class Graph:
-	def __init__(self):
-		dunno = None
+	def __init__(self,df):
+		self.df = df
 
 	def test(self):
 		ax1 = plt.subplot2grid((6,1), (0,0), rowspan = 5, colspan = 1)
 		ax2 = plt.subplot2grid((6,1), (5,0), rowspan = 1, colspan = 1)
 
-		ax1.plot()
+		ax1.plot(self.df.index,self.df['close'])
+		#ax2.bar(self.df.index,self.df['volume'])
 		plt.show()
