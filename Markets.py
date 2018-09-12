@@ -12,13 +12,8 @@ import pandas as pd
 from pandas.io.json import json_normalize
 import pandas_datareader.data as web
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import style
-#from matplotlib.finance import candlestick2_ohlc
-import matplotlib.ticker as mticker
-import matplotlib.dates as mdates
-
-style.use('ggplot')
+import plotly as plt
+import plotly.graph_objs as go
 
 class MarketsListings:
 	def __init__(self):
@@ -117,7 +112,6 @@ class Asset:
 			url = 'https://coinmarketcap.com/currencies/'+self.asset+'/historical-data/?start='+start_date+'&end='+end_date
 			raw_html = urlopen(url)
 			soup = BeautifulSoup(raw_html.read(),"html.parser")
-
 			history = soup.find("table",attrs = {"table"})
 			headings = [th.get_text().replace("*","").replace(" ","").lower() for th in history.find("tr").find_all("th")]
 			candle_data = OrderedDict()
@@ -129,12 +123,12 @@ class Asset:
 				value = td.text.strip()
 				if count == 0:
 					#Creates the date as the key
-					date = str(dateparser.parse(value)).split(" ")[0]
+					date = str(dateparser.parse(value)).split(" ")[0]#need to remove dateparser 
 					candle_data[date] = []
 					count+=1
 				elif count == len(headings)-1:
 					#the final column gets assigned and gets put into the json dictionary
-					data[headings[count]] = int(value.replace(",",""))
+					data[headings[count]] = int(value.replace(",","").replace("-","0"))
 					candle_data[date] = data
 					data = {}
 					count = 0
@@ -150,9 +144,8 @@ class Asset:
 				frames.append(df)
 
 			return pd.concat(frames)
-		
 		except:
-			return "No Such Asset exists"
+			return "No Such Asset Exists"
 		
 	def change_asset(self,asset,start = default_start,end = default_end):
 		'''
@@ -178,54 +171,62 @@ class Asset:
 		'''
 		return self.candles.tail(1)
 
-	def sma(self,time_period = 10, series_type = "close"):
+	def sma(self,time_period = 10, series_type = "close", comb = False):
 		'''
 		Queries Simple Moving Average
 		'''
-		return self.ta.sma(time_period,series_type)
+		return self.data_compliance(self.ta.sma(time_period,series_type),comb)
 
-	def ema(self,time_period = 10, series_type = "close"):
+	def ema(self,time_period = 10, series_type = "close",comb = False):
 		'''
 		Queries Exponential Moving Average
 		'''
-		return self.ta.ema(time_period,series_type)
+		return self.data_compliance(self.ta.ema(time_period,series_type),comb)
 
-	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close"):
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",comb = False):
 		'''
 		Queries Moving Average Convergence/Divergence
 		'''
-		return self.ta.macd(fast_period,slow_period,signal_period,series_type)
+		return self.data_compliance(self.ta.macd(fast_period,slow_period,signal_period,series_type),comb)
 
-	def rsi(self,time_period = 14, series_type = "close"):
+	def rsi(self,time_period = 14, series_type = "close",comb = False):
 		'''
 		Queries the Relative Strength Index
 		'''
-		return self.ta.rsi(time_period,series_type)
+		return self.data_compliance(self.ta.rsi(time_period,series_type),comb)
 
-	def cci(self,time_period = 20):
+	def cci(self,time_period = 20,comb = False):
 		'''
 		Queries the Commodity Channel Index 
 		'''
-		return self.ta.cci(time_period)
+		return self.data_compliance(self.ta.cci(time_period),comb)
 
-	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2):
+	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2, comb = False):
 		'''
 		Queries the Bollinger Bands
 		'''
-		return self.ta.bbands(time_period,series_type,nbdevup,nbdevdn)
+		return self.data_compliance(self.ta.bbands(time_period,series_type,nbdevup,nbdevdn),comb)
 
-	def combine_data(self,data):
+	def obv(self,comb=False):
+		'''
+		Queries the On-Balance Volume
+		'''
+		return self.data_compliance(self.ta.obv(),comb)
+
+	def data_compliance(self,data,combine):
 		'''
 		Combines data frames together with the candle dataframes
-		@param data: list of dataframes.
+		@param data: A dataFrame.
 		'''
-		data.insert(0,self.candles)
-		return pd.concat(data,axis=1,sort=True)
+		if combine:
+			self.candles = pd.concat([self.candles,data],axis=1,sort=True)
+			return self.candles
+		else:
+			return data
 
 	def graph(self,indicators=[]):
-		#CURRENTLY WORKING ON GRAPHING THE DATA
-		graph = Graph(self.graph_builder())
-		graph.test()
+		graph = Graph(self.candles,self.asset)
+		graph.plot()
 
 class Technical_Analysis:
 	'''
@@ -233,14 +234,14 @@ class Technical_Analysis:
 	The class needs to first take in a pandas dataframe consisting of closing,open,high,low prices.
 	'''
 	def __init__(self,df):
-		self.candles = df
+		self.df = df
 
 	def check_intervals(self,time_period):
 		'''
 		Checks to make sure there are enough candle stick data for the time period
 		@param time_period (int): amount of data points one desires to check
 		'''
-		if time_period <= len(self.candles.index):
+		if time_period <= len(self.df.index):
 			return True
 		else:
 			return False
@@ -253,7 +254,7 @@ class Technical_Analysis:
 		'''
 
 		if self.check_intervals(time_period):
-			value = self.candles[series_type].rolling(window=time_period).mean()
+			value = self.df[series_type].rolling(window=time_period).mean()
 			return pd.DataFrame(value.values,index=value.index,columns=['sma_'+str(time_period)]).dropna()
 		else:
 			return "Not enough data points, try to get more historical data"
@@ -265,8 +266,8 @@ class Technical_Analysis:
 		@param series_type (string): The price type in the time series.
 		'''
 		if self.check_intervals(time_period):
-			sma = self.candles[series_type].rolling(window=time_period,min_periods=time_period).mean()[:time_period]
-			rest = self.candles[series_type][time_period:]
+			sma = self.df[series_type].rolling(window=time_period,min_periods=time_period).mean()[:time_period]
+			rest = self.df[series_type][time_period:]
 			ema = pd.concat([sma,rest]).ewm(span=time_period,adjust=False).mean()
 			return pd.DataFrame(ema.values,index=ema.index,columns=['ema_'+str(time_period)]).dropna()
 		else:
@@ -302,9 +303,8 @@ class Technical_Analysis:
 		@param time_period (int): Number of data points used to calculate the rsi. 
 		@param series_type (string): Price type in the time series. 
 		'''
-		#not finished, still trying to figure out how to calculate rsi properly with pandas
 		if self.check_intervals(time_period):
-			value = self.candles[series_type].diff().dropna()
+			value = self.df[series_type].diff().dropna()
 			gain = value * 0
 			loss = value * 0
 
@@ -335,7 +335,7 @@ class Technical_Analysis:
 		@param time_period (int): Number of data points to calculate CCI.
 		'''
 		if self.check_intervals(time_period):
-			tp = (self.candles['high'] + self.candles['low']+self.candles['close'])/3
+			tp = (self.df['high'] + self.df['low']+self.df['close'])/3
 			cci = (tp - tp.rolling(window=time_period).mean()) / (.015 * tp.rolling(window=time_period).std())
 			return pd.DataFrame(cci.values,index=cci.index,columns=['cci_'+str(time_period)]).dropna()
 		else:
@@ -350,23 +350,49 @@ class Technical_Analysis:
 		@param nbdevdn (int): Standard deviation multiplier of the lower band.
 		'''
 		if self.check_intervals(time_period):
-			stdev = self.candles[series_type].rolling(window=time_period).std().dropna()
-			middle_band = self.candles[series_type].rolling(window=time_period).mean().dropna()
+			stdev = self.df[series_type].rolling(window=time_period).std().dropna()
+			middle_band = self.df[series_type].rolling(window=time_period).mean().dropna()
 			upper_band = middle_band+(stdev*nbdevup)
 			lower_band = middle_band-(stdev*nbdevup)
 			join = pd.concat([middle_band,upper_band,lower_band],axis=1,sort=True)
-			return pd.DataFrame(join.values,index=join.index,columns=['middle_band',"upper_band","lower_band"])
+			return pd.DataFrame(join.values,index=join.index,columns=['middle_band_'+str(time_period),'upper_band_'+str(time_period),'lower_band_'+str(time_period)])
 		else:
 			return "Not enough data points, try to get more historical data"
 
+	def obv(self):
+		'''
+		Queries the On-Balance Volume
+		'''
+		dif_prices = self.df['close'].diff()#checks if previous price was > or < to 0
+		volume = self.df['volume'].copy() 
+		volume[dif_prices < 0] = -volume #negates the volume where previous price was less
+		return pd.DataFrame(volume.cumsum().values,index=volume.index,columns=['obv'])
+
 class Graph:
-	def __init__(self,df):
+	def __init__(self,df,asset):
 		self.df = df
+		self.asset = asset
+		self.name = self.asset+'_'+self.df.index[0]+'_'+self.df.index[-1]
 
-	def test(self):
-		ax1 = plt.subplot2grid((6,1), (0,0), rowspan = 5, colspan = 1)
-		ax2 = plt.subplot2grid((6,1), (5,0), rowspan = 1, colspan = 1)
+	def plot(self):
+		trace = go.Candlestick(x=self.df.index,
+                       open=self.df.open,
+                       high=self.df.high,
+                       low=self.df.low,
+                       close=self.df.close)
+		data = [trace]
+		plt.offline.plot(data, filename=self.name+'.html')
 
-		ax1.plot(self.df.index,self.df['close'])
-		#ax2.bar(self.df.index,self.df['volume'])
-		plt.show()
+	def volume_bars(self):
+		colors = []
+
+		for i in range(len(self.df.close)):
+		    if i != 0:
+		        if self.df.close[i] > self.df.close[i-1]:
+		            colors.append('#17BECF')
+		        else:
+		            colors.append('#7F7F7F')
+		    else:
+		        colors.append('#7F7F7F')
+		
+		return go.Bar(x=self.df.index,y=self.df.volume,marker=dict(color=colors),name='Volume')
