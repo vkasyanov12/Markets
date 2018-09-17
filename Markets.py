@@ -373,26 +373,55 @@ class Graph:
 		self.df = df
 		self.asset = asset
 		self.name = self.asset+'_'+self.df.index[0]+'_'+self.df.index[-1]
+		self.fig = None
+		self.build()
 
-	def plot(self):
-		trace = go.Candlestick(x=self.df.index,
-                       open=self.df.open,
-                       high=self.df.high,
-                       low=self.df.low,
-                       close=self.df.close)
-		data = [trace]
-		plt.offline.plot(data, filename=self.name+'.html')
+	def build(self):
+		self.build_candles()
+		self.build_layout()
+		self.build_volume_bars()
+		print("Build Complete")
 
-	def volume_bars(self):
+	def build_candles(self):
+		data = [dict(
+				type = 'candlestick',
+			    open = self.df.open,
+			    high = self.df.high,
+			    low = self.df.low,
+			    close = self.df.close,
+			    x = self.df.index,
+			    yaxis = 'y2',
+			    name = self.asset,
+			    increasing = dict( line = dict(color = '#2f5933')),
+			    decreasing = dict( line = dict( color = '#8c0f0f')))]
+
+		layout = dict()
+		self.fig = dict(data=data,layout=layout)
+
+	def build_layout(self):
+		self.fig['layout'] = dict()
+		self.fig['layout']['plot_bgcolor'] = 'rgb(191, 191, 191)'
+		#self.fig['layout']['xaxis'] = dict( rangeselector = dict( visible = True ) )
+		self.fig['layout']['yaxis'] = dict( domain = [0, 0.2], showticklabels = False )
+		self.fig['layout']['yaxis2'] = dict( domain = [0.2, 0.8] )
+		self.fig['layout']['legend'] = dict( orientation = 'h', y=0.9, x=0.3, yanchor='bottom' )
+		self.fig['layout']['margin'] = dict( t=40, b=40, r=40, l=40 )
+
+	def build_volume_bars(self):
 		colors = []
 
 		for i in range(len(self.df.close)):
 		    if i != 0:
 		        if self.df.close[i] > self.df.close[i-1]:
-		            colors.append('#17BECF')
+		            colors.append('#2f5933')
 		        else:
-		            colors.append('#7F7F7F')
+		            colors.append('#8c0f0f')
 		    else:
-		        colors.append('#7F7F7F')
-		
-		return go.Bar(x=self.df.index,y=self.df.volume,marker=dict(color=colors),name='Volume')
+		        colors.append('#8c0f0f')
+	
+		self.fig['data'].append(dict( x=self.df.index, y=self.df.volume,                         
+                         marker=dict( color=colors ),
+                         type='bar', yaxis='y', name='Volume'))
+
+	def plot(self):
+		plt.offline.plot(self.fig, filename=self.name+'.html')
