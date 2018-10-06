@@ -171,13 +171,13 @@ class Asset:
 		'''
 		return self.candles.tail(1)
 
-	def sma(self,time_period = 10, series_type = "close", comb = False):
+	def sma(self,time_period = 7, series_type = "close", comb = False):
 		'''
 		Queries Simple Moving Average
 		'''
 		return self.data_compliance(self.ta.sma(time_period,series_type),comb)
 
-	def ema(self,time_period = 10, series_type = "close",comb = False):
+	def ema(self,time_period = 7, series_type = "close",comb = False):
 		'''
 		Queries Exponential Moving Average
 		'''
@@ -226,7 +226,7 @@ class Asset:
 
 	def graph(self,indicators=[]):
 		graph = Graph(self.candles,self.asset)
-		graph.plot()
+		#graph.plot()
 
 class Technical_Analysis:
 	'''
@@ -355,7 +355,7 @@ class Technical_Analysis:
 			upper_band = middle_band+(stdev*nbdevup)
 			lower_band = middle_band-(stdev*nbdevup)
 			join = pd.concat([middle_band,upper_band,lower_band],axis=1,sort=True)
-			return pd.DataFrame(join.values,index=join.index,columns=['middle_band_'+str(time_period),'upper_band_'+str(time_period),'lower_band_'+str(time_period)])
+			return pd.DataFrame(join.values,index=join.index,columns=['bband_middle_band_'+str(time_period),'bband_upper_band_'+str(time_period),'bband_lower_band_'+str(time_period)])
 		else:
 			return "Not enough data points, try to get more historical data"
 
@@ -374,12 +374,34 @@ class Graph:
 		self.asset = asset
 		self.name = self.asset+'_'+self.df.index[0]+'_'+self.df.index[-1]
 		self.fig = None
-		self.build()
+		self.layout_count = 2 #Some graphs need a seperate yaxis, this keeps track of it 
+		self.build_test()
+		#self.build()
 
-	def build(self):
+	def build_test(self):
+		self.build_candles()
+		self.build_layout()
+		indicator_dict = {
+			"volume":self.build_volume_bars,
+			"sma":self.build_sma,
+			"ema":self.build_ema,
+			"bband":self.build_bband,
+			"cci":self.build_cci,
+			"rsi":self.build_rsi
+		}
+
+		for indicator in self.df.columns.values:
+			split_indic = indicator.split("_")
+			if split_indic[0] in indicator_dict.keys():
+				indicator_dict[split_indic[0]](self.df[indicator])
+		self.plot()
+
+	def build(self):	
 		self.build_candles()
 		self.build_layout()
 		self.build_volume_bars()
+		self.build_sma()
+		self.build_ema()
 		print("Build Complete")
 
 	def build_candles(self):
@@ -390,7 +412,7 @@ class Graph:
 			    low = self.df.low,
 			    close = self.df.close,
 			    x = self.df.index,
-			    yaxis = 'y2',
+			    yaxis = 'y',
 			    name = self.asset,
 			    increasing = dict( line = dict(color = '#2f5933')),
 			    decreasing = dict( line = dict( color = '#8c0f0f')))]
@@ -402,12 +424,11 @@ class Graph:
 		self.fig['layout'] = dict()
 		self.fig['layout']['plot_bgcolor'] = 'rgb(191, 191, 191)'
 		#self.fig['layout']['xaxis'] = dict( rangeselector = dict( visible = True ) )
-		self.fig['layout']['yaxis'] = dict( domain = [0, 0.2], showticklabels = False )
-		self.fig['layout']['yaxis2'] = dict( domain = [0.2, 0.8] )
+		self.fig['layout']['yaxis'] = dict( domain = [0.2, 0.8])
 		self.fig['layout']['legend'] = dict( orientation = 'h', y=0.9, x=0.3, yanchor='bottom' )
 		self.fig['layout']['margin'] = dict( t=40, b=40, r=40, l=40 )
 
-	def build_volume_bars(self):
+	def build_volume_bars(self,volume):
 		colors = []
 
 		for i in range(len(self.df.close)):
@@ -418,10 +439,47 @@ class Graph:
 		            colors.append('#8c0f0f')
 		    else:
 		        colors.append('#8c0f0f')
-	
-		self.fig['data'].append(dict( x=self.df.index, y=self.df.volume,                         
+		
+		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, 0.25],showticklabels = False)
+		self.fig['data'].append(dict( x=volume.index, y=volume.values,                         
                          marker=dict( color=colors ),
-                         type='bar', yaxis='y', name='Volume'))
+                         type='bar', yaxis='y'+str(self.layout_count), name='volume'))
+		self.layout_count+=1
+	
+	def build_sma(self,sma):
+		self.fig['data'].append( dict( x=sma.index, y=sma.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#E377C2' ),
+                         yaxis = 'y', name=sma.name ) )
+
+	def build_ema(self,ema):
+		self.fig['data'].append( dict( x=ema.index, y=ema.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#1a10a2' ),
+                         yaxis = 'y', name=ema.name ) )
+
+	def build_bband(self,bband):
+		self.fig['data'].append( dict( x=bband.index, y=bband.values, type='scatter', yaxis='y', 
+                         line = dict( width = 1 ),
+                         marker=dict(color='#595959'), hoverinfo='none', 
+                         legendgroup='Bollinger Bands', name=bband.name) )
+
+	def build_cci(self,cci):
+		#Need to figure out how move the graph below the volume bars
+		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, .1])
+		self.fig['data'].append( dict( x=cci.index, y=cci.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#595959' ),
+                         yaxis = 'y'+str(self.layout_count), name=cci.name ) )
+		self.layout_count+=1
+
+	def build_rsi(self,rsi):
+		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, 0.1])
+		self.fig['data'].append( dict( x=rsi.index, y=rsi.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#252770' ),
+                         yaxis = 'y'+str(self.layout_count), name=rsi.name ) )
+		self.layout_count+=1
 
 	def plot(self):
 		plt.offline.plot(self.fig, filename=self.name+'.html')
