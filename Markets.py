@@ -14,6 +14,7 @@ import pandas_datareader.data as web
 import numpy as np
 import plotly as plt
 import plotly.graph_objs as go
+import randomcolor
 
 class MarketsListings:
 	def __init__(self):
@@ -171,43 +172,43 @@ class Asset:
 		'''
 		return self.candles.tail(1)
 
-	def sma(self,time_period = 7, series_type = "close", comb = False):
+	def sma(self,time_period = 7, series_type = "close", comb = True):
 		'''
 		Queries Simple Moving Average
 		'''
 		return self.data_compliance(self.ta.sma(time_period,series_type),comb)
 
-	def ema(self,time_period = 7, series_type = "close",comb = False):
+	def ema(self,time_period = 7, series_type = "close",comb = True):
 		'''
 		Queries Exponential Moving Average
 		'''
 		return self.data_compliance(self.ta.ema(time_period,series_type),comb)
 
-	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",comb = False):
+	def macd(self,fast_period = 12,slow_period = 26,signal_period = 9, series_type = "close",comb = True):
 		'''
 		Queries Moving Average Convergence/Divergence
 		'''
 		return self.data_compliance(self.ta.macd(fast_period,slow_period,signal_period,series_type),comb)
 
-	def rsi(self,time_period = 14, series_type = "close",comb = False):
+	def rsi(self,time_period = 14, series_type = "close",comb = True):
 		'''
 		Queries the Relative Strength Index
 		'''
 		return self.data_compliance(self.ta.rsi(time_period,series_type),comb)
 
-	def cci(self,time_period = 20,comb = False):
+	def cci(self,time_period = 20,comb = True):
 		'''
 		Queries the Commodity Channel Index 
 		'''
 		return self.data_compliance(self.ta.cci(time_period),comb)
 
-	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2, comb = False):
+	def bbands(self,time_period = 20, series_type = "close", nbdevup = 2, nbdevdn = 2, comb = True):
 		'''
 		Queries the Bollinger Bands
 		'''
 		return self.data_compliance(self.ta.bbands(time_period,series_type,nbdevup,nbdevdn),comb)
 
-	def obv(self,comb=False):
+	def obv(self,comb=True):
 		'''
 		Queries the On-Balance Volume
 		'''
@@ -226,7 +227,7 @@ class Asset:
 
 	def graph(self,indicators=[]):
 		graph = Graph(self.candles,self.asset)
-		#graph.plot()
+		graph.plot()
 
 class Technical_Analysis:
 	'''
@@ -292,7 +293,7 @@ class Technical_Analysis:
 			macd_histogram = macd_line-signal_line
 			join = pd.concat([macd_line,signal_line,macd_histogram],axis=1,sort=True)
 
-			return pd.DataFrame(join.values,index=join.index,columns=['macd_line',"signal_line","macd_histogram"])
+			return pd.DataFrame(join.values,index=join.index,columns=['macd_line',"macd_signal_line","macd_histogram"])
 		else:
 			return "Not enough data points, try to get more historical data"
 	
@@ -369,40 +370,40 @@ class Technical_Analysis:
 		return pd.DataFrame(volume.cumsum().values,index=volume.index,columns=['obv'])
 
 class Graph:
+	'''
+	Graph object that is directly associated with the Asset object
+	Ideas used were pulled from
+	https://plot.ly/~jackp/17421/plotly-candlestick-chart-in-python/#/
+	'''
 	def __init__(self,df,asset):
 		self.df = df
 		self.asset = asset
 		self.name = self.asset+'_'+self.df.index[0]+'_'+self.df.index[-1]
 		self.fig = None
-		self.layout_count = 2 #Some graphs need a seperate yaxis, this keeps track of it 
-		self.build_test()
-		#self.build()
+		self.layout_count = 0 #Some graphs need a seperate yaxis, this keeps track of it
+		self.colors_used = []#this keeps track of the colors used for moving averages 
+		self.build()
 
-	def build_test(self):
+	def build(self):	
 		self.build_candles()
-		self.build_layout()
+		
 		indicator_dict = {
 			"volume":self.build_volume_bars,
 			"sma":self.build_sma,
 			"ema":self.build_ema,
 			"bband":self.build_bband,
 			"cci":self.build_cci,
-			"rsi":self.build_rsi
+			"rsi":self.build_rsi,
+			"macd":self.build_macd,
+			"obv":self.build_obv
 		}
 
 		for indicator in self.df.columns.values:
 			split_indic = indicator.split("_")
 			if split_indic[0] in indicator_dict.keys():
 				indicator_dict[split_indic[0]](self.df[indicator])
-		self.plot()
-
-	def build(self):	
-		self.build_candles()
+		
 		self.build_layout()
-		self.build_volume_bars()
-		self.build_sma()
-		self.build_ema()
-		print("Build Complete")
 
 	def build_candles(self):
 		data = [dict(
@@ -419,18 +420,33 @@ class Graph:
 
 		layout = dict()
 		self.fig = dict(data=data,layout=layout)
+		self.layout_count+=1
+
 
 	def build_layout(self):
 		self.fig['layout'] = dict()
 		self.fig['layout']['plot_bgcolor'] = 'rgb(191, 191, 191)'
-		#self.fig['layout']['xaxis'] = dict( rangeselector = dict( visible = True ) )
-		self.fig['layout']['yaxis'] = dict( domain = [0.2, 0.8])
+		self.fig['layout']['xaxis'] = dict(rangeslider=dict(visible=False))
 		self.fig['layout']['legend'] = dict( orientation = 'h', y=0.9, x=0.3, yanchor='bottom' )
-		self.fig['layout']['margin'] = dict( t=40, b=40, r=40, l=40 )
+		self.fig['layout']['margin'] = dict( t=0, b=0, r=35, l=35 )
+		
+		if self.layout_count==1: #this checks if there is only candle data
+			self.fig['layout']['yaxis'] = dict( domain = [0, 1])
+		else:
+			candle_start = self.layout_count*.10 #y-cordinate of starting candle chart
+			current_start = candle_start - .12 #for the begining spot 
+			current_end = candle_start - .02 #for the next y-axis end point
+
+			self.fig['layout']['yaxis'] = dict( domain = [candle_start, 1]) #creates candle y-axis
+
+			for axis in range(1,self.layout_count): 
+				self.fig['layout']['yaxis'+str(axis+1)] = dict( domain = [current_start,current_end])
+				current_start = current_start - .12 #adjusts the position for the next y-axis
+				current_end = current_start + .1
 
 	def build_volume_bars(self,volume):
 		colors = []
-
+		self.layout_count+=1
 		for i in range(len(self.df.close)):
 		    if i != 0:
 		        if self.df.close[i] > self.df.close[i-1]:
@@ -440,22 +456,20 @@ class Graph:
 		    else:
 		        colors.append('#8c0f0f')
 		
-		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, 0.25],showticklabels = False)
 		self.fig['data'].append(dict( x=volume.index, y=volume.values,                         
                          marker=dict( color=colors ),
                          type='bar', yaxis='y'+str(self.layout_count), name='volume'))
-		self.layout_count+=1
-	
+
 	def build_sma(self,sma):
 		self.fig['data'].append( dict( x=sma.index, y=sma.values, type='scatter', mode='lines', 
                          line = dict( width = 1 ),
-                         marker = dict( color = '#E377C2' ),
+                         marker = dict( color = self.random_color() ),
                          yaxis = 'y', name=sma.name ) )
 
 	def build_ema(self,ema):
 		self.fig['data'].append( dict( x=ema.index, y=ema.values, type='scatter', mode='lines', 
                          line = dict( width = 1 ),
-                         marker = dict( color = '#1a10a2' ),
+                         marker = dict( color = self.random_color() ),
                          yaxis = 'y', name=ema.name ) )
 
 	def build_bband(self,bband):
@@ -465,21 +479,68 @@ class Graph:
                          legendgroup='Bollinger Bands', name=bband.name) )
 
 	def build_cci(self,cci):
-		#Need to figure out how move the graph below the volume bars
-		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, .1])
+		self.layout_count+=1
 		self.fig['data'].append( dict( x=cci.index, y=cci.values, type='scatter', mode='lines', 
                          line = dict( width = 1 ),
                          marker = dict( color = '#595959' ),
                          yaxis = 'y'+str(self.layout_count), name=cci.name ) )
-		self.layout_count+=1
 
 	def build_rsi(self,rsi):
-		self.fig['layout']['yaxis'+str(self.layout_count)] = dict( domain = [0, 0.1])
+		self.layout_count+=1
 		self.fig['data'].append( dict( x=rsi.index, y=rsi.values, type='scatter', mode='lines', 
                          line = dict( width = 1 ),
                          marker = dict( color = '#252770' ),
                          yaxis = 'y'+str(self.layout_count), name=rsi.name ) )
-		self.layout_count+=1
 
+	def build_macd(self,macd):
+
+		if macd.name=='macd_line':
+			self.layout_count+=1
+			self.fig['data'].append( dict( x=macd.index, y=macd.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#000000' ),
+                         yaxis = 'y'+str(self.layout_count), name=macd.name ))
+
+		elif macd.name=='macd_signal_line':
+			self.fig['data'].append( dict( x=macd.index, y=macd.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#990000' ),
+                         yaxis = 'y'+str(self.layout_count), name=macd.name ))
+	
+		if macd.name=='macd_histogram':
+
+			positive = macd * 0
+			negative = macd * 0
+			final = macd * 0
+
+			positive[macd>0] = '#2f5933'
+			negative[macd<0] = '#8c0f0f'
+			
+			final[positive=='#2f5933'] = positive[positive=='#2f5933']
+			final[negative=='#8c0f0f'] = negative[negative=='#8c0f0f']
+	
+			self.fig['data'].append(dict( x=macd.index, y=macd.values,                         
+                         marker=dict( color=final.values ),
+                         type='bar', yaxis='y'+str(self.layout_count), name=macd.name))
+
+	def build_obv(self,obv):
+		self.layout_count+=1
+		self.fig['data'].append( dict( x=obv.index, y=obv.values, type='scatter', mode='lines', 
+                         line = dict( width = 1 ),
+                         marker = dict( color = '#252770' ),
+                         yaxis = 'y'+str(self.layout_count), name=obv.name ) )
+	
+	def random_color(self):
+		'''
+		Generates random colors for moving averages
+		'''
+		random_color = randomcolor.RandomColor().generate()
+
+		while random_color in self.colors_used:
+			random_color = randomcolor.RandomColor().generate()
+		self.colors_used.append(random_color)
+		
+		return random_color
+	
 	def plot(self):
 		plt.offline.plot(self.fig, filename=self.name+'.html')
