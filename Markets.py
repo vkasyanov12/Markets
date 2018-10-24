@@ -97,6 +97,7 @@ class Asset:
 		if isinstance(self.candles,str):
 			raise ValueError(self.candles)
 		self.ta = Technical_Analysis(self.candles)
+		
 
 	def historical_data(self,start_date = default_start, end_date = default_end):
 		'''
@@ -147,7 +148,11 @@ class Asset:
 			return pd.concat(frames)
 		except:
 			return "No Such Asset Exists"
-		
+	
+	def get_daily_change(self,time_periods=1,comb=True):
+		df = self.candles.close.pct_change(periods=time_periods)
+		return self.data_compliance(pd.DataFrame(df.values,index=df.index,columns=['% Change']),comb)
+
 	def change_asset(self,asset,start = default_start,end = default_end):
 		'''
 		Changes the asset. If it fails to find the asset, the original asset remains
@@ -218,6 +223,7 @@ class Asset:
 		'''
 		Combines data frames together with the candle dataframes
 		@param data: A dataFrame.
+		@param combine: Boolean value to indicate whether or not to combine the data
 		'''
 		if combine:
 			self.candles = pd.concat([self.candles,data],axis=1,sort=True)
@@ -228,6 +234,16 @@ class Asset:
 	def graph(self,indicators=[]):
 		graph = Graph(self.candles,self.asset)
 		graph.plot()
+
+	def export_to_csv(self,path=None,name=None):
+		if name==None:
+			name=self.name = self.asset+'_'+self.candles.index[0]+'_'+self.candles.index[-1]
+		
+		if path==None:
+			self.candles.to_csv(name+".csv")
+		else:
+			location = path+"\\"+name+".csv"
+			self.candles.to_csv(location)
 
 class Technical_Analysis:
 	'''
@@ -434,7 +450,7 @@ class Graph:
 			self.fig['layout']['yaxis'] = dict( domain = [0, 1])
 		else:
 			candle_start = self.layout_count*.10 #y-cordinate of starting candle chart
-			current_start = candle_start - .12 #for the begining spot 
+			current_start = candle_start - .12 #for the y-axis begining spot 
 			current_end = candle_start - .02 #for the next y-axis end point
 
 			self.fig['layout']['yaxis'] = dict( domain = [candle_start, 1]) #creates candle y-axis
