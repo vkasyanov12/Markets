@@ -1,7 +1,6 @@
 import json
 import requests
 from urllib.request import urlopen
-from collections import OrderedDict
 from bs4 import BeautifulSoup
 import dateparser
 import datetime
@@ -116,36 +115,33 @@ class Asset:
 			soup = BeautifulSoup(raw_html.read(),"html.parser")
 			history = soup.find("table",attrs = {"table"})
 			headings = [th.get_text().replace("*","").replace(" ","").lower() for th in history.find("tr").find_all("th")]
-			candle_data = OrderedDict()
-			data = {}
+			candle_data = {}
+	
+			for heading in headings:#initial assignment of the candle_data
+				candle_data[heading] = []
+
 			count = 0 #this is used to determine which column is being used
-			date = ""
+			date = "" #holds the current date
+
 			#this gets all the rows from the table. It is one constant stream of data
 			for td in history.find_all("td"):
 				value = td.text.strip()
 				if count == 0:
-					#Creates the date as the key
-					date = str(dateparser.parse(value)).split(" ")[0]#need to remove dateparser 
-					candle_data[date] = []
+					date = str(dateparser.parse(value)).split(" ")[0] #gets the date
+					candle_data[headings[count]].append(date) 
 					count+=1
 				elif count == len(headings)-1:
-					#the final column gets assigned and gets put into the json dictionary
-					data[headings[count]] = int(value.replace(",","").replace("-","0"))
-					candle_data[date] = data
-					data = {}
-					count = 0
+					#last column before count reset
+					candle_data[headings[count]].append(int(value.replace(",","").replace("-","0")))
+					count = 0 #this will reset to 0 when we have reached the final column
 				else:
-					data[headings[count]] = float(value.replace(",",""))
+					candle_data[headings[count]].append(float(value.replace(",","")))
 					count+=1
 			
-			candle_data = OrderedDict(reversed(list(candle_data.items()))) #reversed it in order to have the most recent items on the bottom
+			df = pd.DataFrame(data=candle_data)
+			df.set_index(headings[0],inplace=True)
 			
-			frames = []
-			for day in candle_data.keys(): #builds the panda dataframe
-				df = pd.DataFrame(candle_data[day],index = [day])
-				frames.append(df)
-
-			return pd.concat(frames)
+			return df.reindex(index=df.index[::-1])
 		except:
 			return "No Such Asset Exists"
 	
