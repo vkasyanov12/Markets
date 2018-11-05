@@ -6,6 +6,7 @@ import dateparser
 import datetime
 from datetime import timedelta
 from datetime import datetime
+from collections import OrderedDict
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
 import pandas as pd
 from pandas.io.json import json_normalize
@@ -18,46 +19,33 @@ import randomcolor
 class MarketsListings:
 	def __init__(self):
 		self._cryptocurrency_base_url = 'https://api.coinmarketcap.com/v2/'
-		self._cryptoccurency_listings = self.get_coin_translator()
-		self._stock_listings = self.get_nasdaq_listings()
-
-	def get_coin_translator(self):
-		'''
-    	coinmarketcap contains listings of cryptocurrencies
-    	each one contaning the id,name,symbol and website_slug.
-    	This function gets every coin listed and stores it in memory.
-    	Due to coinmarketcap api, this information is essential in order
-    	to request the correct data.
-    	'''
-		raw_data = requests.get(self._cryptocurrency_base_url+'listings/')
-		raw_json = raw_data.json()
-
-		data = {}
-		for listing in raw_json['data']:
-			data[listing['name'].upper()] = listing
-		return data
-
-	def get_nasdaq_listings(self):
-		'''
-		returns the stock market listings of their ticker and security name
-		'''
-		listings = get_nasdaq_symbols()
-		
-		data = OrderedDict()
-		for i in range (len(listings)):
-			data[listings.iloc[i]['NASDAQ Symbol']] = listings.iloc[i]['Security Name']	
-		return data
-
-	def get_stock_listings(self):
+		self._cryptoccurency_listings = None
+		self._stock_listings = None
+   
+	def stock_listings(self):
 		'''
 		returns the stock listings variable
 		'''
+		if self._stock_listings == None:
+			listings = get_nasdaq_symbols()
+			self._stock_listings = OrderedDict()
+			for i in range (len(listings)):
+				self._stock_listings[listings.iloc[i]['NASDAQ Symbol']] = listings.iloc[i]['Security Name']	
+		
 		return self._stock_listings
 
-	def get_cryptocurrency_listings(self):
+	def cryptocurrency_listings(self):
 		'''
 		returns the cryptocurrency listings from coinmarketcap
 		'''
+		if self._cryptoccurency_listings == None:
+			raw_data = requests.get(self._cryptocurrency_base_url+'listings/')
+			raw_json = raw_data.json()
+
+			self._cryptoccurency_listings = {}
+			for listing in raw_json['data']:
+				self._cryptoccurency_listings[listing['name'].upper()] = listing
+
 		return self._cryptoccurency_listings
 
 	def get_top_crypto(self,num = 25):
@@ -140,8 +128,7 @@ class Asset:
 			
 			df = pd.DataFrame(data=candle_data)
 			df.set_index(headings[0],inplace=True)
-			
-			return df.reindex(index=df.index[::-1])
+			return df.reindex(index=df.index[::-1]) #reverses the dataframe, from most recent to the oldest as first
 		except:
 			return "No Such Asset Exists"
 	
@@ -380,6 +367,7 @@ class Technical_Analysis:
 		volume = self.df['volume'].copy() 
 		volume[dif_prices < 0] = -volume #negates the volume where previous price was less
 		return pd.DataFrame(volume.cumsum().values,index=volume.index,columns=['obv'])
+
 
 class Graph:
 	'''
