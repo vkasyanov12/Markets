@@ -4,6 +4,8 @@ from datetime import datetime
 from dateutil.relativedelta import *
 import pandas as pd
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
+import math
+
 class Portfolio:
 
     def __init__(self,strategy):
@@ -21,32 +23,33 @@ class Portfolio:
             return False
 
     def momen_win_loss(self,time_period=6):
-        start = (datetime.now() - relativedelta(years=5)) + relativedelta(days=+1) #date starts 4 years and 364 days apart
+        start = (datetime.now() - relativedelta(years=5)) + relativedelta(days=+1) #date starts 4 years and 364 days 
         end = start + relativedelta(months=+time_period)
-        portfolio = pd.DataFrame(columns = ["stock","change"])
+        portfolio = pd.DataFrame(columns = ["stock","change","position"])
         stocks = ['aapl',"nvda","amzn","AMD","INTC","FB","TWTR","IBM","GOOGL","JPM"]
-        start_time = datetime.now()
         
+        start_time = datetime.now()
         for stock in stocks:
-            str_start = start.strftime('%Y-%m-%d')
-            str_end = end.strftime('%Y-%m-%d')
             try:
-                current_asset = mk.Asset(stock,start=start.strftime('%Y%m%d'))
-                start_value = current_asset.candles.loc[str_start].close #not all stocks go back up to 5 years
-                end_value = current_asset.candles.loc[str_end].close
-                change = ((end_value-start_value)/start_value) * 100
-                portfolio.loc[len(portfolio)+1] = [stock,change]
+                current_asset = mk.Asset(stock,start=start.strftime('%Y%m%d'),end=end.strftime('%Y%m%d'))
+                start_value = current_asset.candles.close.loc[start.strftime('%Y-%m-%d')] #not all stocks go back up to 5 years
+                end_value = current_asset.candles.close.loc[end.strftime('%Y-%m-%d')]
+                portfolio.loc[len(portfolio)+1] = [stock,((end_value-start_value)/start_value) * 100,None]
             except:
                 pass
         end_time = datetime.now()
-        print(portfolio.sort_values(by=['change'],ascending=False))
         print(end_time-start_time)
-
-
-
+        portfolio = portfolio.sort_values(by=['change'],ascending=False)
+        cut_off = math.floor(len(portfolio)*.1)
+        
+        portfolio[:cut_off].position = "Long" #assigns the long position in the top 10%
+        portfolio[-cut_off:].position = "Short" #assigns short position in the bottom 10%
+        self.portfolio = portfolio.copy()
+        return self.portfolio
+        
 def main():
     a = Portfolio("momentum win/lose")
     print("done")
-    a.momen_win_loss()
+    print(a.momen_win_loss())
 
 main()
