@@ -8,16 +8,17 @@ import math
 from multiprocessing import Pool, freeze_support
 import os
 import numpy as np
+import calendar
 
 class Portfolio:
-    def __init__(self,strategy):
+    def __init__(self,strategy="momentum win/lose",start=(datetime.now() - relativedelta(years=1)) - relativedelta(days=1)):
         self.strategies = ["momentum win/lose"]
         self.markets = get_nasdaq_symbols().index
         self.portfolio_strategy = self.check_strategy(strategy)
         if self.portfolio_strategy == False:
             raise ValueError("No such strategy exists")
         self.portfolio = None
-        self.start = None
+        self.start = self.date_adjuster(start)
         self.end = None
 
     def check_strategy(self,strategy):
@@ -26,27 +27,57 @@ class Portfolio:
         else:
             return False
     
+    def date_adjuster(self,date):
+        date_dict = {5:2,6:1} #this is saturday and sunday and how many days we need to move forward for monday
+
+        if date.weekday() in date_dict.keys():
+            return date + relativedelta(days=date_dict[date.weekday()])
+        else:
+            return date
+    
+    def date_finder(self,date,delta,day_type):
+        if delta > 0 :
+            date_dict = {
+                        "days":date + relativedelta(days=delta),
+                        "months":date + relativedelta(months=delta),
+                        "years":date + relativedelta(years=delta)
+                    }
+        else:
+            delta = delta * -1
+            date_dict = {
+                        "days":date - relativedelta(days=delta),
+                        "months":date - relativedelta(months=delta),
+                        "years":date - relativedelta(years=delta)
+                    }
+        return date_dict[day_type]
+    
     def momen_calc(self,stock):
         try:
-            current_asset = mk.Asset(stock,start=self.start.strftime('%Y%m%d'),end=self.end.strftime('%Y%m%d'))
-            start_value = current_asset.candles.close.loc[self.start.strftime('%Y-%m-%d')]
-            end_value = current_asset.candles.close.loc[self.end.strftime('%Y-%m-%d')]
-            return [stock,((end_value-start_value)/start_value) * 100,None]
+            start_date = ((datetime.now() - relativedelta(years=5)) + relativedelta(days=+1)).strftime('%Y%m%d') #pulls all 5 years of data
+            j_dates = {
+                    "j3":self.date_adjuster(self.date_finder(self.start,3,"months")).strftime('%Y-%m-%d'),
+                    "j6":self.date_adjuster(self.date_finder(self.start,6,"months")).strftime('%Y-%m-%d'),
+                    "j9":self.date_adjuster(self.date_finder(self.start,9,"months")).strftime('%Y-%m-%d'),
+                    "j12":self.date_adjuster(self.date_finder(self.start,12,"months")).strftime('%Y-%m-%d'),
+                    }
+            
+            current_asset = mk.Asset(stock,start=start_date)
+            n1 = current_asset.candles.close.loc[self.end.strftime('%Y-%m-%d')]
+            n2 = current_asset.candles.close.loc[self.start.strftime('%Y-%m-%d')]
+            change = ((n2-n1)/n1) * 100
+            j3 = ((current_asset.candles.close.loc[j_dates["j3"]] - n2)/n2) * 100
+            j6 = ((current_asset.candles.close.loc[j_dates["j6"]] - n2)/n2) * 100
+            j9 = ((current_asset.candles.close.loc[j_dates["j9"]] - n2)/n2) * 100
+            j12 = ((current_asset.candles.close.loc[j_dates["j12"]] - n2)/n2) * 100
+            
+            return [stock,change,None,j3,j6,j9,j12]
         except:
-            return [stock,float('nan'),None]
-        
+            return [stock,float('nan'),0,0,0,0,None]
     
-    def momen_win_loss(self,time_period=6):
-        self.start = (datetime.now() - relativedelta(years=5)) + relativedelta(days=+3)
-        #self.start = (datetime.now() - relativedelta(years=5)) + relativedelta(days=+1) #date starts 4 years and 364 days 
-        #self.end = self.start + relativedelta(months=+time_period)
-        self.end = self.start + relativedelta(months=+time_period) + relativedelta(days=+3)
-        
-        
-        #stocks = ["aapl","NVDA","amzn","amd","goog","F","INTC"]
+    def momen_win_loss(self,k=6):
+        self.end = self.date_adjuster(self.date_finder(self.start,k*-1,"months"))
+        #stocks = ["aapl","NVDA","amzn","amd","goog","F","INTC","IBM","FB","DIS"]
         stocks = self.markets[:200]
-        #print(len(self.markets))
-        
         start_time = datetime.now()
         
         pool = Pool(os.cpu_count())
@@ -55,46 +86,21 @@ class Portfolio:
         pool.close()
         pool.join()
         
-        #cut_off = math.floor(len(portfolio)*.1)
-        self.portfolio = pd.DataFrame(results,columns = ["stock","change","position"]).dropna(subset=["change"])
-        self.portfolio = self.portfolio.sort_values(by=['change'],ascending=False)
-        end_time = datetime.now()
+        temp_portfolio = pd.DataFrame(results,columns = ["stock","change","position","j3","j6","j9","j12"]).dropna(subset=["change"])
+        temp_portfolio = temp_portfolio.sort_values(by=['change'],ascending=False)
+        temp_portfolio = temp_portfolio.set_index("stock")
         
-        
-        print(end_time-start_time)
-        print(self.portfolio)
-        
-        
-    '''
-    def momen_win_loss(self,time_period=6):
-        start = (datetime.now() - relativedelta(years=5)) + relativedelta(days=+1) #date starts 4 years and 364 days 
-        end = start + relativedelta(months=+time_period)
-        portfolio = pd.DataFrame(columns = ["stock","change","position"])
-        stocks = ['aapl',"nvda","amzn","AMD","INTC","FB","TWTR","IBM","GOOGL","JPM"]
-        
-        start_time = datetime.now()
-        for stock in stocks:
-            try:
-                current_asset = mk.Asset(stock,start=start.strftime('%Y%m%d'),end=end.strftime('%Y%m%d'))
-                start_value = current_asset.candles.close.loc[start.strftime('%Y-%m-%d')] #not all stocks go back up to 5 years
-                end_value = current_asset.candles.close.loc[end.strftime('%Y-%m-%d')]
-                portfolio.loc[len(portfolio)+1] = [stock,((end_value-start_value)/start_value) * 100,None]
-            except:
-                pass
+        cut_off = math.floor(len(temp_portfolio)*.1)
+
+        self.portfolio = pd.concat([temp_portfolio[:cut_off],temp_portfolio[-cut_off:]])
+   
         end_time = datetime.now()
         print(end_time-start_time)
-        portfolio = portfolio.sort_values(by=['change'],ascending=False)
-        cut_off = math.floor(len(portfolio)*.1)
-        
-        portfolio[:cut_off].position = "Long" #assigns the long position in the top 10%
-        portfolio[-cut_off:].position = "Short" #assigns short position in the bottom 10%
-        self.portfolio = portfolio.copy()
         return self.portfolio
-    ''' 
 def main():
     a = Portfolio("momentum win/lose")
-    print("done")
     print(a.momen_win_loss())
+
 
 if __name__ == '__main__':
 	freeze_support()
