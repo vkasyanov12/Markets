@@ -64,35 +64,36 @@ class Portfolio:
             current_asset = mk.Asset(stock,start=start_date)
             n1 = current_asset.candles.close.loc[self.end.strftime('%Y-%m-%d')]
             n2 = current_asset.candles.close.loc[self.start.strftime('%Y-%m-%d')]
-            change = ((n2-n1)/n1) * 100
-            j3 = ((current_asset.candles.close.loc[j_dates["j3"]] - n2)/n2) * 100
-            j6 = ((current_asset.candles.close.loc[j_dates["j6"]] - n2)/n2) * 100
-            j9 = ((current_asset.candles.close.loc[j_dates["j9"]] - n2)/n2) * 100
-            j12 = ((current_asset.candles.close.loc[j_dates["j12"]] - n2)/n2) * 100
+            t_return = ((n2-n1)/n1)
+            j3 = ((current_asset.candles.close.loc[j_dates["j3"]] - n2)/n2) 
+            j6 = ((current_asset.candles.close.loc[j_dates["j6"]] - n2)/n2) 
+            j9 = ((current_asset.candles.close.loc[j_dates["j9"]] - n2)/n2) 
+            j12 = ((current_asset.candles.close.loc[j_dates["j12"]] - n2)/n2)
             
-            return [stock,change,None,j3,j6,j9,j12]
+            return [stock,self.start.strftime('%Y-%m-%d'),t_return,None,j3,j6,j9,j12]
         except:
-            return [stock,float('nan'),0,0,0,0,None]
+            return [stock,0,float('nan'),0,0,0,0,None]
     
     def momen_win_loss(self,k=6):
         self.end = self.date_adjuster(self.date_finder(self.start,k*-1,"months"))
-        #stocks = ["aapl","NVDA","amzn","amd","goog","F","INTC","IBM","FB","DIS"]
-        stocks = self.markets[:200]
+        stocks = self.markets[:500]
         start_time = datetime.now()
-        
         pool = Pool(os.cpu_count())
         
         results = pool.map(self.momen_calc,stocks)
         pool.close()
         pool.join()
         
-        temp_portfolio = pd.DataFrame(results,columns = ["stock","change","position","j3","j6","j9","j12"]).dropna(subset=["change"])
-        temp_portfolio = temp_portfolio.sort_values(by=['change'],ascending=False)
+        temp_portfolio = pd.DataFrame(results,columns = ["stock","p_date","return","position","j3","j6","j9","j12"]).dropna(subset=["return"])
+        temp_portfolio = temp_portfolio.sort_values(by=['return'],ascending=False)
         temp_portfolio = temp_portfolio.set_index("stock")
         
         cut_off = math.floor(len(temp_portfolio)*.1)
-
+        
         self.portfolio = pd.concat([temp_portfolio[:cut_off],temp_portfolio[-cut_off:]])
+        self.portfolio.loc[:cut_off,"position"] = "buy"
+        self.portfolio.loc[-cut_off:,"position"] = "sell"
+
    
         end_time = datetime.now()
         print(end_time-start_time)
