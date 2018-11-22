@@ -13,9 +13,9 @@ class Portfolio:
     @param strategy (string):Current strategy
     @param start (datetime):begining date of portfolio
     '''
-    def __init__(self,strategy="momentum win/lose",start=(datetime.now() - relativedelta(years=1)) - relativedelta(days=1)):
-        self.strategies = ["momentum win/lose"]
-        self.markets = get_nasdaq_symbols().index #holds all nasdaq traded stocks
+    def __init__(self,strategy="momentum returns",start=(datetime.now() - relativedelta(years=1)) - relativedelta(days=1)):
+        self.strategies = {"momen_returns":self.momen_returns,"momen_low_high":self.momen_low_high}
+        self.markets = get_nasdaq_symbols().index[:250] #holds all nasdaq traded stocks
         self.portfolio_strategy = self.check_strategy(strategy) 
         if self.portfolio_strategy == False:
             raise ValueError("No such strategy exists")
@@ -27,7 +27,7 @@ class Portfolio:
         Checks to make sure that this strategy exists
         @param strategy(string): strategy to check for support
         '''
-        if strategy in self.strategies:
+        if strategy in self.strategies.keys():
             return strategy
         else:
             return False
@@ -47,7 +47,7 @@ class Portfolio:
         '''
         Finds the date from the current passed in.
         @param date(datetime): starting date
-        @param delta(int): the difference from the current date
+        @param delta(int): the difference from the current date. >0 = look foward, <0 look back
         @param day_type(string): different date types to skip over. Accepted Values:days,months,years 
         
         '''
@@ -66,9 +66,11 @@ class Portfolio:
                     }
         return date_dict[day_type]
     
-    def momen_calc(self,parameters):
+    def momen_returns(self,parameters):
         '''
         The multiprocessing function that is associated with momentum_win_loss
+        This strategy revolves around buying the top % returners and selling bottom % returners losers
+        The calculation that is used to determine this: (current_price - k_look_back) / current_price
         @param parameters (list):Holds all the parameters for each thread
         parameter[0] (int): starting index position
         parameter[1] (int): ending index position
@@ -96,6 +98,43 @@ class Portfolio:
             except:
                 results.append([self.markets[index],0,float('nan'),0,0,0,0,None])
         
+        return pd.DataFrame(results,columns = ["stock","p_date","return","position","j3","j6","j9","j12"]).dropna(subset=["return"])
+    
+
+    def momen_low_high(self,parameters):
+        '''
+        The multiprocessing function that is associated with momentum_win_loss
+        This strategy revolves around buying the top performers and selling bottom performers.
+        The calculation that is used to determine this: (start_price - k_low) / (k_high - k_low)
+        @param parameters (list):Holds all the parameters for each thread
+        parameter[0] (int): starting index position
+        parameter[1] (int): ending index position
+        parameter[2] (string): start date where to begin to pull stock data: usually up to 5 years
+        parameter[3] (string): Look back date from the self.start date
+        parameter[4] (string): j3 is looking 3 months ahead
+        parameter[5] (string): j6 is looking 6 months ahead
+        parameter[6] (string): j9 is looking 9 months ahead
+        parameter[7] (string): j12 is looking 12 months ahead
+        '''
+        
+        results = [] #holds the dataframes
+
+        for index in range(parameters[0],parameters[1]):
+            try:
+                current_asset = mk.Asset(self.markets[index],start=parameters[2])
+                start_price = current_asset.candles.close.loc[self.start.strftime('%Y-%m-%d')]
+                subset = current_asset.candles[(current_asset.candles.index >= parameters[3]) & (current_asset.candles.index <= self.start.strftime('%Y-%m-%d'))]
+                high_price = subset.close.max()
+                low_price = subset.close.min()
+                calc = (start_price - low_price) / (high_price - low_price)
+                j3 = ((current_asset.candles.close.loc[parameters[4]] - start_price)/start_price) 
+                j6 = ((current_asset.candles.close.loc[parameters[5]] - start_price)/start_price) 
+                j9 = ((current_asset.candles.close.loc[parameters[6]] - start_price)/start_price) 
+                j12 = ((current_asset.candles.close.loc[parameters[7]] - start_price)/start_price)
+                results.append([self.markets[index],self.start.strftime('%Y-%m-%d'),calc,None,j3,j6,j9,j12])
+            except:
+                results.append([self.markets[index],0,float('nan'),0,0,0,0,None])
+ 
         return pd.DataFrame(results,columns = ["stock","p_date","return","position","j3","j6","j9","j12"]).dropna(subset=["return"])
     
     def momen_win_loss(self,k=6):
@@ -126,26 +165,29 @@ class Portfolio:
             parameters = [start_position,end_position,start_date,end_date,j_dates["j3"],j_dates["j6"],j_dates["j9"],j_dates["j12"]]
             start_position = start_position + split_work #updates start position for the next stock
             work.append(parameters)
-     
+        
+        
         pool = Pool(cpu_count)
-        results = pool.map(self.momen_calc,work)
+        results = pool.map(self.strategies[self.portfolio_strategy],work)
         pool.close()
         pool.join()
         
         temp_portfolio = pd.concat(results).sort_values(by=['return'],ascending=False).dropna(subset=["return"])
         temp_portfolio = temp_portfolio.set_index("stock")
-        
+ 
         cut_off = math.floor(len(temp_portfolio)*.1)
-        
+
         self.portfolio = pd.concat([temp_portfolio[:cut_off],temp_portfolio[-cut_off:]])
         self.portfolio.loc[:cut_off,"position"] = "buy"
         self.portfolio.loc[-cut_off:,"position"] = "sell"
         
         return self.portfolio
+        
     
 def main():
-    a = Portfolio("momentum win/lose")
-    print(a.momen_win_loss())
+    a = Portfolio("momen_returns")
+    print(a.momen_win_loss(k=12))
+    
 
 
 if __name__ == '__main__':
