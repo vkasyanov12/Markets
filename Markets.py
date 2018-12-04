@@ -3,17 +3,14 @@ import requests
 from urllib.request import urlopen
 from bs4 import BeautifulSoup
 import dateparser
-import datetime
-from datetime import timedelta
 from datetime import datetime
+from datetime import timedelta
 from collections import OrderedDict
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
 import pandas as pd
-from pandas.io.json import json_normalize
 import pandas_datareader.data as web
 import numpy as np
 import plotly as plt
-import plotly.graph_objs as go
 import randomcolor
 
 class MarketsListings:
@@ -215,6 +212,7 @@ class Asset:
 			return data
 
 	def graph(self,indicators=[]):
+
 		graph = Graph(self.candles,self.asset)
 		graph.plot()
 
