@@ -16,12 +16,12 @@ class Portfolio:
     '''
     def __init__(self,strategy="momentum returns",start=(datetime.now() - relativedelta(years=1)) - relativedelta(days=1)):
         self.strategies = {"momen_returns":self.momen_returns,"momen_low_high":self.momen_low_high}
-        self.markets = get_nasdaq_symbols().index[:250] #holds all nasdaq traded stocks
+        self.markets = get_nasdaq_symbols().index #holds all nasdaq traded stocks
         self.portfolio_strategy = self.check_strategy(strategy) 
         if self.portfolio_strategy == False:
             raise ValueError("No such strategy exists")
         self.portfolio = None
-        self.start = start #makes sure the date provided is valid
+        self.start = datetime.strptime(start,"%Y-%m-%d") 
         self.purchase_dates = [] #used for testing strategies
 
     def check_strategy(self,strategy):
@@ -37,22 +37,25 @@ class Portfolio:
     def date_adjuster(self,df,dates):
         '''
         Finds the next nearest index that is within 7 days
+        @param df (pandas dataframe): stock datafraame
+        @param dates(datetime): dates to check
+        @return final_dates (list): returns proper dates in YYYY-mm-dd format
         '''
-        final_dates = []
+        final_dates = [] #holds all of the dates
         for date in dates:
             if date.strftime('%Y-%m-%d') not in df.index:
-                try:
+                try: #attempts to find the next index
                     value = datetime.strptime(df[df.index >= date.strftime('%Y-%m-%d')].index[0],"%Y-%m-%d")
-                    delta = (value - date).days
+                    delta = (value - date).days #finds the difference of found index and original date
                 except:
                     pass
                 try:
                     value2 = datetime.strptime(df[df.index <= date.strftime('%Y-%m-%d')].index[-1],"%Y-%m-%d")
                     delta2 = (date - value2).days
                 except:
-                    return False
+                    return False #if failed to find next or previous index skip this stock
 
-                if delta <=7:
+                if delta <=7: #checks if the delta is within 7 days
                     final_dates.append(value.strftime('%Y-%m-%d'))
                 elif delta2 <=7:
                     final_dates.append(value2.strftime('%Y-%m-%d'))
@@ -214,12 +217,24 @@ class Portfolio:
         return self.portfolio
         
     def momen_returns_test(self,parameters):
+        '''
+        Multi-threading function that is associated with momen_win_loss_test.
+        This retrieves all the stock data using the Asset class. It calculatesthe proper returns and j-values
+        by sending indexes of stocks from self.markets and splits the work between all of the threads.
+        It creates a piece of a portfolio which will be merged later in the momen_win_loss_test with the rest on
+        a specific purchase date. It returns muliple pieces of portfolios for each purchase date
+        @param parameters (list): holds all the parameters
+        parameters[0] stock_index_start: begining index for self.markets
+        parameters[1] stock_index_end: ending index for self.markets
+        parameters[2] start_date: date to pull 5 years worth of data
+        parameters[3] k_value: k look back period
+        '''
         portfolios = [[] for i in range(len(self.purchase_dates))] #holds portfolio matrices
-        avoid = ["ZJZZT","ZWZZT","ZVV","ZBZX"," TRUE","ZXZZT","ZBZZT","ZAZZT"]
+        avoid = ["ZJZZT","ZWZZT","ZVV","ZBZX"," TRUE","ZXZZT","ZBZZT","ZAZZT"] #avoid these stocks, these are nasdaq test stocks
         for stock_index in range(parameters[0],parameters[1]):
             if self.markets[stock_index] not in avoid:
                 try:
-                    current_asset = mk.Asset(self.markets[stock_index],start=parameters[2])  
+                    current_asset = mk.Asset(self.markets[stock_index],start=parameters[2])#pulls the data
                     
                     for index in range(len(self.purchase_dates)):
         
@@ -231,43 +246,53 @@ class Portfolio:
                                     "j12":self.date_finder(self.purchase_dates[index],12,"months"),
                                     }
                             date_list = [self.purchase_dates[index],k_date,j_dates["j3"],j_dates["j6"],j_dates["j9"],j_dates["j12"]]
-                            proper_dates = self.date_adjuster(current_asset.candles,date_list)
+                            proper_dates = self.date_adjuster(current_asset.candles,date_list) #checks to make sure the stock has proper date indexes
                             
-                            if proper_dates!=False:
+                            if proper_dates!=False: #if it fails avoid it
                                 purchase_price = current_asset.candles.close.loc[proper_dates[0]]
                                 k_price = current_asset.candles.close.loc[proper_dates[1]]
                                 t_return = (purchase_price - k_price) / k_price
-                                j3 = ((current_asset.candles.close.loc[proper_dates[2]] - purchase_price)/purchase_price) /3 
-                                j6 = ((current_asset.candles.close.loc[proper_dates[3]] - purchase_price)/purchase_price) / 6
-                                j9 = ((current_asset.candles.close.loc[proper_dates[4]] - purchase_price)/purchase_price) / 9
-                                j12 = ((current_asset.candles.close.loc[proper_dates[5]] - purchase_price)/purchase_price) / 12
-                                portfolios[index].append([self.markets[stock_index],proper_dates[0],t_return,None,j3,j6,j9,j12]) 
+                                if t_return < .10 and t_return > -.10: #tolerance, it attempts to avoid highly volitile stocks
+                                    j3 = ((current_asset.candles.close.loc[proper_dates[2]] - purchase_price)/purchase_price) /3 
+                                    j6 = ((current_asset.candles.close.loc[proper_dates[3]] - purchase_price)/purchase_price) / 6
+                                    j9 = ((current_asset.candles.close.loc[proper_dates[4]] - purchase_price)/purchase_price) / 9
+                                    j12 = ((current_asset.candles.close.loc[proper_dates[5]] - purchase_price)/purchase_price) / 12
+                                    portfolios[index].append([self.markets[stock_index],proper_dates[0],t_return,None,j3,j6,j9,j12]) 
         
                 except:
                     pass
             
         final_portfolios = []  
-        for matrix in portfolios:
+        for matrix in portfolios: #builds the piece of the portfolio to return
             final_portfolios.append(pd.DataFrame(matrix,columns = ["stock","p_date","avg_return","position","j3","j6","j9","j12"]).dropna(subset=["avg_return"]))
         
         return final_portfolios
 
     
     def momen_win_loss_test(self,k=6):
-        start_time = datetime.now()
-        start_date = ((datetime.now() - relativedelta(years=5)) + relativedelta(days=+1))
-        final_purchase_date = (datetime.now() - relativedelta(years=1))
+        '''
+        This test how well the the momentum returns portfolio generator performs over a period of time.
+        It generates a portfolio every month after the first purchase date.
+        It looks at the top performing and bottom performing stocks based upon a 
+        past price. The past price is determined by a look back period known as k. 
+        It then compares the current purchase price date to 3,6,9,12 months(j) aheads performances.
+        It creates a dataframe of all the buy portfolios and sell portfolios mean monthly returns
+        @param k (int): look back period
+        @returns (dict): average returns of buy and sell portfolios.
+        '''
+        start_date = ((datetime.now() - relativedelta(years=5)) + relativedelta(days=+1)) #used as a paramter to pull 5 years worth of data
+        final_purchase_date = (datetime.now() - relativedelta(years=1)) #final purchases of stocks, due to j value going up to 12 months
 
-        current_purchase_date = self.date_finder(start_date,k,"months")
+        current_purchase_date = self.date_finder(start_date,k,"months") #first purchase date 
         self.purchase_dates.append(current_purchase_date)
         
-        while current_purchase_date<=final_purchase_date:
+        while current_purchase_date<=final_purchase_date: #generates monthly purchase dates for portfolios
             current_purchase_date = self.date_finder(current_purchase_date,1,"months")
-            self.purchase_dates.append(current_purchase_date)
+            self.purchase_dates.append(current_purchase_date) #
         
         cpu_count = os.cpu_count()
         work = [] #holds all the params
-        split_work = math.floor((len(self.markets)/cpu_count)) #determines how many stocks each core will get 
+        split_work = math.floor((len(self.markets)/cpu_count)) #determines how many stocks each thread will get 
         start_position = 0#used for distribution for cores
         
         for cpu in range(1,cpu_count+1):
@@ -285,54 +310,35 @@ class Portfolio:
         pool.close()
         pool.join()
         
-        final_portfolios = []
-        current_portfolio = []
+        buy_values = [] #matrix for buy values
+        sell_values = [] #matrix for sell values
+        current_portfolio = [] #temporary portfolio holder when portfolio is being merged into one
 
-        for purchase_date in range(len(results[0])):
-            for data in range(len(results)):
+        for purchase_date in range(len(results[0])): #for every portfolio
+            for data in range(len(results)): #where the data gets merged on the same purchase dates
                 current_portfolio.append(results[data][purchase_date])
             
-            temp_portfolio = pd.concat(current_portfolio).sort_values(by=['avg_return'],ascending=False)
-            temp_portfolio = temp_portfolio.set_index("stock")
-            cut_off = math.floor(len(temp_portfolio)*.1)
-            temp_portfolio = pd.concat([temp_portfolio[:cut_off],temp_portfolio[-cut_off:]])
-            temp_portfolio.loc[:cut_off,"position"] = "buy"
+            temp_portfolio = pd.concat(current_portfolio).sort_values(by=['avg_return'],ascending=False) 
+            temp_portfolio = temp_portfolio.set_index("stock") 
+            cut_off = math.floor(len(temp_portfolio)*.1) #value for top/bottom 10% performers
+            temp_portfolio = pd.concat([temp_portfolio[:cut_off],temp_portfolio[-cut_off:]]) #creates a new portfolio based upon cut_off
+            temp_portfolio.loc[:cut_off,"position"] = "buy" 
             temp_portfolio.loc[-cut_off:,"position"] = "sell"
-            final_cut_off = math.ceil(len(temp_portfolio)*.02)
-            temp_portfolio = pd.concat([temp_portfolio[final_cut_off:],temp_portfolio[:-final_cut_off]])
-            temp_portfolio["avg_return"] = temp_portfolio["avg_return"] / k
-            final_portfolios.append(temp_portfolio)
-            current_portfolio = []
             
-        total_portfolio = pd.concat(final_portfolios)
-        buy_port = total_portfolio[total_portfolio["position"]=="buy"]
-        sell_port = total_portfolio[total_portfolio["position"]=="sell"]
-        j_columns = ["j3","j6","j9","j12"]
+            buy_port = temp_portfolio[temp_portfolio["position"]=="buy"] #splits by positions
+            sell_port = temp_portfolio[temp_portfolio["position"]=="sell"]        
+            buy_values.append([buy_port["avg_return"].mean(),buy_port["j3"].mean(),buy_port["j6"].mean(),buy_port["j9"].mean(),buy_port["j12"].mean()])
+            sell_values.append([sell_port["avg_return"].mean(),sell_port["j3"].mean(),sell_port["j6"].mean(),sell_port["j9"].mean(),sell_port["j12"].mean()])
 
-        results_matrix = []
-        for j_column in j_columns:
-            t_test_buy = ttest_ind(buy_port[j_column], buy_port['avg_return'])
-            j_buy_mean = buy_port[j_column].mean()
-            t_test_sell = ttest_ind(sell_port[j_column], sell_port['avg_return'])
-            j_sell_mean = (sell_port[j_column].mean())
-            sell_row = [j_column+"_sell",j_sell_mean,t_test_sell]
-            results_matrix.append(sell_row)
-            buy_row = [j_column+"_buy",j_buy_mean,t_test_buy]
-            results_matrix.append(buy_row)
-            t_buysell = ttest_ind((buy_port[j_column] - sell_port[j_column]).dropna(), (buy_port["avg_return"] - sell_port["avg_return"]).dropna())
-            results_matrix.append([j_column+"_buy-sell",j_buy_mean-j_sell_mean,t_buysell])
-            
+            current_portfolio = []
         
-        df = pd.DataFrame(results_matrix,columns = ["j_value","k_value_"+str(k),"t/p-values"]).set_index("j_value")
-        end_time = datetime.now()
-        print(end_time - start_time)
-        return df
-        
-   
+        buy_portfolios = pd.DataFrame(buy_values,columns=["avg_returns","j3","j6","j9","j12"]).dropna()
+        sell_portfolios = pd.DataFrame(sell_values,columns=["avg_returns","j3","j6","j9","j12"]).dropna()
+        return {"buy":buy_portfolios,"sell":sell_portfolios}
+    
 def main():
     a = Portfolio("momen_returns")
-    print(a.momen_win_loss_test(k=3))
-    #test = [1,2,3,4,5,6,7,8,9]
+    a.momen_win_loss_test(k=12)
 
 
 if __name__ == '__main__':
