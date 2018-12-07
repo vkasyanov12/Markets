@@ -4,24 +4,24 @@ from dateutil.relativedelta import *
 import pandas as pd
 from pandas_datareader.nasdaq_trader import get_nasdaq_symbols
 import math
-from multiprocessing import Pool, freeze_support
+from multiprocessing import Pool
 import os
-from scipy.stats import ttest_ind
+
 
 class Portfolio:
     '''
     Portfolio class that creates a portfolio based upon the strategy assigned
     @param strategy (string):Current strategy
-    @param start (datetime):begining date of portfolio
+    @param start (datetime):begining date of portfolio. Default is 2 days before the current day
     '''
-    def __init__(self,strategy="momentum returns",start=(datetime.now() - relativedelta(years=1)) - relativedelta(days=1)):
+    def __init__(self,strategy="momentum returns",start=datetime.now() - relativedelta(days=2)):
         self.strategies = {"momen_returns":self.momen_returns,"momen_low_high":self.momen_low_high}
         self.markets = get_nasdaq_symbols().index #holds all nasdaq traded stocks
         self.portfolio_strategy = self.check_strategy(strategy) 
         if self.portfolio_strategy == False:
             raise ValueError("No such strategy exists")
         self.portfolio = None
-        self.start = datetime.strptime(start,"%Y-%m-%d") 
+        self.start = start 
         self.purchase_dates = [] #used for testing strategies
 
     def check_strategy(self,strategy):
@@ -103,34 +103,26 @@ class Portfolio:
         parameter[0] (int): starting index position
         parameter[1] (int): ending index position
         parameter[2] (string): start date where to begin to pull stock data: usually up to 5 years
-        parameter[3] purchase date
+        parameter[3] (string): purchase date
         parameter[4] (string): Look back date from the self.start date
-        parameter[5] (string): j3 is looking 3 months ahead
-        parameter[6] (string): j6 is looking 6 months ahead
-        parameter[7] (string): j9 is looking 9 months ahead
-        parameter[8] (string): j12 is looking 12 months ahead
         '''
-        
         results = [] #holds the dataframes
 
         for index in range(parameters[0],parameters[1]):
             try:
                 current_asset = mk.Asset(self.markets[index],start=parameters[2]) #pulls stock data
                 proper_dates = self.date_adjuster(current_asset.candles,parameters[3:])
-     
+
                 if proper_dates!=False:
                     purchase_date = current_asset.candles.close.loc[proper_dates[0]] #change the start date with date_changer
                     k_price = current_asset.candles.close.loc[proper_dates[1]] #finds the date of k date
                     t_return = ((purchase_date-k_price)/k_price)
-                    j3 = ((current_asset.candles.close.loc[proper_dates[2]] - purchase_date)/purchase_date) 
-                    j6 = ((current_asset.candles.close.loc[proper_dates[3]] - purchase_date)/purchase_date) 
-                    j9 = ((current_asset.candles.close.loc[proper_dates[4]] - purchase_date)/purchase_date) 
-                    j12 = ((current_asset.candles.close.loc[proper_dates[5]] - purchase_date)/purchase_date)
-                    results.append([self.markets[index],proper_dates[0],t_return,None,j3,j6,j9,j12])
+                    if t_return < .10 and t_return > -.10: #tolerance, it attempts to avoid highly volitile stocks
+                        results.append([self.markets[index],proper_dates[0],t_return,None])
             except:
                 pass
 
-        return pd.DataFrame(results,columns = ["stock","p_date","return","position","j3","j6","j9","j12"]).dropna(subset=["return"])
+        return pd.DataFrame(results,columns = ["stock","p_date","avg_return","position"]).dropna(subset=["avg_return"])
                 
 
     def momen_low_high(self,parameters):
@@ -147,6 +139,9 @@ class Portfolio:
         parameter[5] (string): j6 is looking 6 months ahead
         parameter[6] (string): j9 is looking 9 months ahead
         parameter[7] (string): j12 is looking 12 months ahead
+        
+        
+        ##NOTE THIS IS NOT WORKING PROPERLY DO NOT RUN THIS, THIS STILL NEEDS TO BE FIXED
         '''
         
         results = [] #holds the dataframes
@@ -167,7 +162,7 @@ class Portfolio:
             except:
                 results.append([self.markets[index],0,float('nan'),0,0,0,0,None])
  
-        return pd.DataFrame(results,columns = ["stock","p_date","return","position","j3","j6","j9","j12"]).dropna(subset=["return"])
+        return pd.DataFrame(results,columns = ["stock","p_date","avg_return","position","j3","j6","j9","j12"]).dropna(subset=["avg_return"])
 
 
     def momen_win_loss(self,k=6):
@@ -178,12 +173,6 @@ class Portfolio:
         end_date = self.date_finder(self.start,k*-1,"months") #finds the k date
         start_date = ((datetime.now() - relativedelta(years=5)) + relativedelta(days=+1)).strftime('%Y%m%d') #pulls 5 years of data
         cpu_count = os.cpu_count()
-        j_dates = { #gets the j dates
-                "j3":self.date_finder(self.start,3,"months"),
-                "j6":self.date_finder(self.start,6,"months"),
-                "j9":self.date_finder(self.start,9,"months"),
-                "j12":self.date_finder(self.start,12,"months"),
-                }
            
         work = [] #holds all the params
         split_work = math.floor((len(self.markets)/cpu_count)) #determines how many stocks each core will get 
@@ -195,7 +184,7 @@ class Portfolio:
             if cpu == cpu_count: #this makes sure that the last core doesn't miss 1 stock
                 end_position = len(self.markets)
             
-            parameters = [start_position,end_position,start_date,self.start,end_date,j_dates["j3"],j_dates["j6"],j_dates["j9"],j_dates["j12"]]
+            parameters = [start_position,end_position,start_date,self.start,end_date]
             start_position = start_position + split_work #updates start position for the next stock
             work.append(parameters)
                     
@@ -205,8 +194,9 @@ class Portfolio:
         pool.close()
         pool.join()
         
-        temp_portfolio = pd.concat(results).sort_values(by=['return'],ascending=False).dropna(subset=["return"])
+        temp_portfolio = pd.concat(results).sort_values(by=['avg_return'],ascending=False).dropna(subset=["avg_return"])
         temp_portfolio = temp_portfolio.set_index("stock")
+        temp_portfolio["avg_return"] = temp_portfolio["avg_return"] / k
  
         cut_off = math.floor(len(temp_portfolio)*.1)
 
@@ -335,12 +325,5 @@ class Portfolio:
         buy_portfolios = pd.DataFrame(buy_values,columns=["avg_returns","j3","j6","j9","j12"]).dropna()
         sell_portfolios = pd.DataFrame(sell_values,columns=["avg_returns","j3","j6","j9","j12"]).dropna()
         return {"buy":buy_portfolios,"sell":sell_portfolios}
-    
-def main():
-    a = Portfolio("momen_returns")
-    a.momen_win_loss_test(k=12)
 
 
-if __name__ == '__main__':
-    freeze_support()
-    main()
